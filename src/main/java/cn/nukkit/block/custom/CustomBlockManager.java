@@ -1,5 +1,6 @@
 package cn.nukkit.block.custom;
 
+import cn.nukkit.GameVersion;
 import cn.nukkit.Server;
 import cn.nukkit.block.Block;
 import cn.nukkit.block.BlockID;
@@ -80,7 +81,13 @@ public class CustomBlockManager {
     }
 
     public void registerCustomBlock(String identifier, int nukkitId, CustomBlockDefinition blockDefinition, Supplier<BlockContainer> factory) {
-        this.registerCustomBlock(identifier, nukkitId, null, blockDefinition, meta -> factory.get());
+        this.registerCustomBlock(identifier, nukkitId, null, blockDefinition, meta -> {
+            BlockContainer blockContainer = factory.get();
+            if (blockContainer instanceof BlockStorageContainer storageContainer) {
+                storageContainer.setStorage(meta);
+            }
+            return blockContainer;
+        });
     }
 
     private static void variantGenerations(BlockProperties properties, String[] states, List<Map<String, Serializable>> variants, Map<String, Serializable> temp, int offset) {
@@ -139,30 +146,34 @@ public class CustomBlockManager {
         this.blockDefinitions.put(defaultState.getLegacyId(), blockDefinition);
 
         int itemId = 255 - nukkitId;
-        for (RuntimeItemMapping mapping : RuntimeItems.VALUES) {
-            mapping.registerItem(identifier, nukkitId, itemId, 0);
-        }
 
         if (properties != null) {
             BlockProperties finalProperties = properties;
             variantGenerations(properties, properties.getNames().toArray(new String[0]))
                     .forEach(states -> {
-                        final int[] meta = {0};
-                        states.forEach((name, value) -> {
-                            meta[0] = finalProperties.setValue(meta[0], name, value);
-                        });
+                        int meta = 0;
 
-                        if(meta[0] != 0) {
-                            CustomBlockState state;
-                            try {
-                                state = this.createBlockState(identifier, (nukkitId << Block.DATA_BITS) | meta[0], finalProperties, factory);
-                            } catch (InvalidBlockPropertyMetaException e) {
-                                log.error(e);
-                                return; // Nukkit has more states than our block
-                            }
-                            this.legacy2CustomState.put(state.getLegacyId(), state);
+                        for (String name : states.keySet()) {
+                            meta = finalProperties.setValue(meta, name, states.get(name));
                         }
+
+                        for (RuntimeItemMapping mapping : RuntimeItems.VALUES) {
+                            mapping.registerCustomBlockItem(identifier, itemId, meta);
+                        }
+
+                        CustomBlockState state;
+                        try {
+                            state = this.createBlockState(identifier, (nukkitId << Block.DATA_BITS) | (meta & Block.DATA_MASK), finalProperties, factory);
+                        } catch (InvalidBlockPropertyMetaException e) {
+                            log.error(e);
+                            return; // Nukkit has more states than our block
+                        }
+                        this.legacy2CustomState.put(state.getLegacyId(), state);
                     });
+        } else {
+            for (RuntimeItemMapping mapping : RuntimeItems.VALUES) {
+                mapping.registerCustomBlockItem(identifier, itemId, 0);
+            }
         }
     }
 
@@ -201,15 +212,16 @@ public class CustomBlockManager {
 
         long startTime = System.currentTimeMillis();
 
-        BlockPalette storagePalette = GlobalBlockPalette.getPaletteByProtocol(LevelDBConstants.PALETTE_VERSION);
+        BlockPalette storagePalette = GlobalBlockPalette.getPaletteByProtocol(GameVersion.getFeatureVersion());
         boolean result = false;
         ObjectSet<BlockPalette> set = new ObjectArraySet<>();
-        for (int protocol : ProtocolInfo.SUPPORTED_PROTOCOLS) {
+        for (GameVersion gameVersion : GameVersion.values()) {
+            int protocol = gameVersion.getProtocol();
             if (protocol < ProtocolInfo.v1_16_100 || protocol < this.server.minimumProtocol) {
                 continue;
             }
 
-            BlockPalette palette = GlobalBlockPalette.getPaletteByProtocol(protocol);
+            BlockPalette palette = GlobalBlockPalette.getPaletteByProtocol(gameVersion);
             if (set.contains(palette)) {
                 continue;
             }
@@ -218,7 +230,7 @@ public class CustomBlockManager {
             if (palette.getProtocol() == storagePalette.getProtocol()) {
                 this.recreateBlockPalette(palette, new ObjectArrayList<>(NukkitLegacyMapper.loadBlockPalette()));
             } else {
-                Path path = this.getVanillaPalettePath(palette.getProtocol());
+                Path path = this.getVanillaPalettePath(palette.getGameVersion());
                 if (!Files.exists(path)) {
                     log.warn("No vanilla palette found for {}.", Utils.getVersionByProtocol(palette.getProtocol()));
                     continue;
@@ -233,12 +245,23 @@ public class CustomBlockManager {
     }
 
     private void recreateBlockPalette(BlockPalette palette) throws IOException {
-        List<NbtMap> vanillaPalette = new ObjectArrayList<>(this.loadVanillaPalette(palette.getProtocol()));
+        List<NbtMap> vanillaPalette = new ObjectArrayList<>(this.loadVanillaPalette(palette.getGameVersion()));
         this.recreateBlockPalette(palette, vanillaPalette);
     }
 
     private void recreateBlockPalette(BlockPalette palette, List<NbtMap> vanillaPalette) {
-        List<NbtMap> vanillaPaletteList = new ObjectArrayList<>();
+        Map<String, List<NbtMap>> vanillaPaletteList;
+        if (palette.getProtocol() >= ProtocolInfo.v1_18_30) {
+            vanillaPaletteList = new Object2ObjectRBTreeMap<>(HashedPaletteComparator.INSTANCE);
+        } else {
+            vanillaPaletteList = new Object2ObjectRBTreeMap<>(AlphabetPaletteComparator.INSTANCE);
+        }
+
+        int paletteVersion = -1;
+        String lastName = null;
+        List<NbtMap> group = new ObjectArrayList<>();
+        int runtimeId = 0;
+        Int2ObjectMap<NbtMap> runtimeId2State = new Int2ObjectOpenHashMap<>();
         for (NbtMap state : vanillaPalette) {
             //删除不属于原版的内容
             if (state.containsKey("network_id") || state.containsKey("name_hash") || state.containsKey("block_id")) {
@@ -248,66 +271,87 @@ public class CustomBlockManager {
                 builder.remove("block_id");
                 state = builder.build();
             }
-            vanillaPaletteList.add(state);
+
+            int version = state.getInt("version");
+            if (version != paletteVersion) {
+                paletteVersion = version;
+            }
+
+            String name = state.getString("name");
+            if (lastName != null && !name.equals(lastName)) {
+                vanillaPaletteList.put(lastName, group);
+                group = new ObjectArrayList<>();
+            }
+            group.add(state);
+            runtimeId2State.put(runtimeId++, state);
+            lastName = name;
+        }
+        if (lastName != null) {
+            vanillaPaletteList.put(lastName, group);
         }
 
         Object2ObjectMap<NbtMap, IntSet> state2Legacy = new Object2ObjectLinkedOpenHashMap<>();
 
-        int paletteVersion = vanillaPaletteList.get(0).getInt("version");
-
         for (Int2IntMap.Entry entry : palette.getLegacyToRuntimeIdMap().int2IntEntrySet()) {
-            int runtimeId = entry.getIntValue();
-            NbtMap state = vanillaPaletteList.get(runtimeId);
+            int rid = entry.getIntValue();
+            NbtMap state = runtimeId2State.get(rid);
             if (state == null) {
-                log.info("Unknown runtime ID {}! protocol={}", runtimeId, palette.getProtocol());
+                log.info("Unknown runtime ID {}! protocol={}", rid, palette.getProtocol());
                 continue;
             }
             IntSet legacyIds = state2Legacy.computeIfAbsent(state, s -> new IntOpenHashSet());
             legacyIds.add(entry.getIntKey());
         }
 
+        lastName = null;
+        group = new ObjectArrayList<>();
         for (CustomBlockState definition : this.legacy2CustomState.values()) {
             NbtMap state = definition.getBlockState();
             if (state.getInt("version") != paletteVersion) {
                 state = state.toBuilder().putInt("version", paletteVersion).build();
             }
             state2Legacy.computeIfAbsent(state, s -> new IntOpenHashSet()).add(legacyToFullId(definition.getLegacyId()));
-            vanillaPaletteList.add(state);
-        }
 
-        if (palette.getProtocol() >= ProtocolInfo.v1_18_30) {
-            vanillaPaletteList.sort(HashedPaletteComparator.INSTANCE);
-        } else {
-            vanillaPaletteList.sort(AlphabetPaletteComparator.INSTANCE);
+            String name = state.getString("name");
+            if (lastName != null && !name.equals(lastName)) {
+                vanillaPaletteList.put(lastName, group);
+                group = new ObjectArrayList<>();
+            }
+            group.add(state);
+            lastName = name;
+        }
+        if (lastName != null) {
+            vanillaPaletteList.put(lastName, group);
         }
 
         palette.clearStates();
-        boolean levelDb = palette.getProtocol() == GlobalBlockPalette.getPaletteByProtocol(LevelDBConstants.PALETTE_VERSION).getProtocol(); //防止小版本不相等问题
+        boolean levelDb = palette.getProtocol() == GlobalBlockPalette.getPaletteByProtocol(GameVersion.getFeatureVersion()).getProtocol(); //防止小版本不相等问题
         if (levelDb) {
             BlockStateMapping.get().clearMapping();
         }
 
-        for (int runtimeId = 0; runtimeId < vanillaPaletteList.size(); runtimeId++) {
-            NbtMap state = vanillaPaletteList.get(runtimeId);
-            if(!BlockStateMapping.get().containsState(state)) {
-                if (levelDb) {
-                    BlockStateMapping.get().registerState(runtimeId, state);
-                }
+        runtimeId = 0;
+        for (List<NbtMap> states : vanillaPaletteList.values()) {
+            for (NbtMap state : states) {
+                if(!levelDb || !BlockStateMapping.get().containsState(state)) {
+                    if (levelDb) {
+                        BlockStateMapping.get().registerState(runtimeId, state);
+                    }
 
-                IntSet legacyIds = state2Legacy.get(state);
-                if (legacyIds == null) {
-                    continue;
+                    IntSet legacyIds = state2Legacy.get(state);
+                    if (legacyIds != null) {
+                        CompoundTag nukkitState = convertNbtMap(state);
+                        for (Integer fullId : legacyIds) {
+                            palette.registerState(fullId >> Block.DATA_BITS, (fullId & Block.DATA_MASK), runtimeId, nukkitState);
+                        }
+                    }
                 }
-
-                CompoundTag nukkitState = convertNbtMap(state);
-                for (Integer fullId : legacyIds) {
-                    palette.registerState(fullId >> Block.DATA_BITS, (fullId & Block.DATA_MASK), runtimeId, nukkitState);
-                }
+                runtimeId++;
             }
         }
     }
 
-    private List<NbtMap> loadVanillaPalette(int version) throws FileNotFoundException {
+    private List<NbtMap> loadVanillaPalette(GameVersion version) throws FileNotFoundException {
         Path path = this.getVanillaPalettePath(version);
         if (!Files.exists(path)) {
             throw new FileNotFoundException("Missing vanilla palette for version " + version);
@@ -320,8 +364,8 @@ public class CustomBlockManager {
         }
     }
 
-    private Path getVanillaPalettePath(int version) {
-        return this.getBinPath().resolve("vanilla_palette_" + version + ".nbt");
+    private Path getVanillaPalettePath(GameVersion version) {
+        return this.getBinPath().resolve("vanilla_palette_" + version.getProtocol() + ".nbt");
     }
 
     public Block getBlock(int legacyId) {
@@ -383,10 +427,8 @@ public class CustomBlockManager {
     public static CompoundTag convertNbtMap(NbtMap nbt) {
         try {
             ByteArrayOutputStream stream = new ByteArrayOutputStream();
-            try (NBTOutputStream nbtOutputStream = NbtUtils.createWriter(stream)) {
+            try (stream; NBTOutputStream nbtOutputStream = NbtUtils.createWriter(stream)) {
                 nbtOutputStream.writeTag(nbt);
-            } finally {
-                stream.close();
             }
             return NBTIO.read(stream.toByteArray(), ByteOrder.BIG_ENDIAN, false);
         } catch (IOException e) {

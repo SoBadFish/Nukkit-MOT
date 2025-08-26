@@ -150,6 +150,23 @@ public class SimpleCommandMap implements CommandMap {
     }
 
     @Override
+    public void unregister(String... commands) {
+        for (String name : commands) {
+            Command command = this.getCommand(name);
+            if (command != null) {
+                command.unregister(this);
+            }
+        }
+    }
+
+    @Override
+    public void unregister(Command... commands) {
+        for (Command command : commands) {
+            command.unregister(this);
+        }
+    }
+
+    @Override
     public void registerSimpleCommands(Object object) {
         for (Method method : object.getClass().getDeclaredMethods()) {
             cn.nukkit.command.simple.Command def = method.getAnnotation(cn.nukkit.command.simple.Command.class);
@@ -191,8 +208,8 @@ public class SimpleCommandMap implements CommandMap {
         this.knownCommands.put(fallbackPrefix + ':' + label, command);
 
         //if you're registering a command alias that is already registered, then return false
-        boolean alreadyRegistered = this.knownCommands.containsKey(label);
         Command existingCommand = this.knownCommands.get(label);
+        boolean alreadyRegistered = existingCommand != null;
         boolean existingCommandIsNotVanilla = alreadyRegistered && !(existingCommand instanceof VanillaCommand);
         //basically, if we're an alias and it's already registered, or we're a vanilla command, then we can't override it
         if ((command instanceof VanillaCommand || isAlias) && alreadyRegistered && existingCommandIsNotVanilla) {

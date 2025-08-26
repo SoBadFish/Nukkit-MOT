@@ -8,6 +8,7 @@ import cn.nukkit.level.GameRules;
 import cn.nukkit.level.GlobalBlockPalette;
 import cn.nukkit.nbt.NBTIO;
 import cn.nukkit.nbt.tag.CompoundTag;
+import cn.nukkit.network.protocol.types.AuthoritativeMovementMode;
 import cn.nukkit.network.protocol.types.ExperimentData;
 import cn.nukkit.network.protocol.types.NetworkPermissions;
 import cn.nukkit.utils.Binary;
@@ -109,18 +110,31 @@ public class StartGamePacket extends DataPacket {
     public String worldName;
     public String premiumWorldTemplateId = "";
     public boolean isTrial = false;
+    /**
+     * @deprecated use {@link #authoritativeMovementMode} instead.
+     */
+    @Deprecated
     public boolean isMovementServerAuthoritative;
+    /**
+     * @deprecated since v818. {@link AuthoritativeMovementMode#SERVER_WITH_REWIND} is now the default movement mode.
+     */
+    @SuppressWarnings("dep-ann")
+    public AuthoritativeMovementMode authoritativeMovementMode;
+    public int rewindHistorySize;
     public boolean isServerAuthoritativeBlockBreaking;
     public long currentTick;
     public int enchantmentSeed;
     public Collection<CustomBlockDefinition> blockDefinitions = CustomBlockManager.get().getBlockDefinitions();
-    public String multiplayerCorrelationId = "";
+    public String multiplayerCorrelationId = "00000000-0000-0000-0000-000000000000";
     public boolean isDisablingPersonas;
     public boolean isDisablingCustomSkins;
     /**
      * @since v527
      */
     public CompoundTag playerPropertyData = new CompoundTag("");
+    /**
+     * If true, the server will inform clients that they have the ability to generate visual level chunks outside of player interaction distances.
+     */
     public boolean clientSideGenerationEnabled;
     public byte chatRestrictionLevel;
     public boolean disablePlayerInteractions;
@@ -163,6 +177,14 @@ public class StartGamePacket extends DataPacket {
      * @since v685
      */
     public String scenarioId = "";
+    /**
+     * @since v818
+     */
+    public String ownerIdentifier = "";
+    /**
+     * @since v827
+     */
+    public boolean tickDeathSystemsEnabled;
 
     @Override
     public void decode() {
@@ -170,6 +192,10 @@ public class StartGamePacket extends DataPacket {
 
     @Override
     public void encode() {
+        if (this.authoritativeMovementMode == null) { //兼容插件
+            this.authoritativeMovementMode = (this.isMovementServerAuthoritative || this.protocol >= ProtocolInfo.v1_21_80) ? AuthoritativeMovementMode.SERVER : AuthoritativeMovementMode.CLIENT;
+        }
+
         this.reset();
         this.putEntityUniqueId(this.entityUniqueId);
         this.putEntityRuntimeId(this.entityRuntimeId);
@@ -309,7 +335,7 @@ public class StartGamePacket extends DataPacket {
                         this.putString(this.worldId);
                         this.putString(this.scenarioId);
                         if (protocol >= ProtocolInfo.v1_21_90) {
-                            this.putString(""); // OwnerId
+                            this.putString(this.ownerIdentifier); // OwnerId
                         }
                     }
                 }
@@ -325,15 +351,15 @@ public class StartGamePacket extends DataPacket {
             if (protocol >= ProtocolInfo.v1_16_100) {
                 if (protocol >= ProtocolInfo.v1_16_210) {
                     if (protocol < ProtocolInfo.v1_21_90) {
-                        this.putVarInt(this.isMovementServerAuthoritative ? 1 : 0); // 2 - rewind
+                        this.putVarInt(this.authoritativeMovementMode.ordinal());
                     }
-                    this.putVarInt(0); // RewindHistorySize
-                    this.putBoolean(this.isServerAuthoritativeBlockBreaking); // isServerAuthoritativeBlockBreaking
+                    this.putVarInt(this.rewindHistorySize);
+                    this.putBoolean(this.isServerAuthoritativeBlockBreaking);
                 } else {
-                    this.putVarInt(this.isMovementServerAuthoritative ? 1 : 0); // 2 - rewind
+                    this.putVarInt(this.authoritativeMovementMode.ordinal());
                 }
             } else {
-                this.putBoolean(this.isMovementServerAuthoritative);
+                this.putBoolean(this.authoritativeMovementMode != AuthoritativeMovementMode.CLIENT);
             }
         }
         this.putLLong(this.currentTick);
@@ -359,7 +385,7 @@ public class StartGamePacket extends DataPacket {
                 this.put(GlobalBlockPalette.getCompiledTable(this.protocol));
             }
             if (protocol >= ProtocolInfo.v1_12_0 && protocol < ProtocolInfo.v1_21_60) {
-                this.put(RuntimeItems.getMapping(protocol).getItemPalette());
+                this.put(RuntimeItems.getMapping(gameVersion).getItemPalette());
             }
             this.putString(this.multiplayerCorrelationId);
             if (protocol == 354 && version != null && version.startsWith("1.11.4")) {
@@ -385,6 +411,9 @@ public class StartGamePacket extends DataPacket {
                                 if (protocol >= ProtocolInfo.v1_19_80) {
                                     this.putBoolean(this.blockNetworkIdsHashed);
                                     if (protocol >= ProtocolInfo.v1_20_0_23) {
+                                        if (protocol >= ProtocolInfo.v1_21_100) {
+                                            this.putBoolean(this.tickDeathSystemsEnabled);
+                                        }
                                         this.putBoolean(this.networkPermissions.isServerAuthSounds());
                                     }
                                 }

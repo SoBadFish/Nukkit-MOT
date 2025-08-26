@@ -58,10 +58,7 @@ import cn.nukkit.network.BatchingHelper;
 import cn.nukkit.network.Network;
 import cn.nukkit.network.RakNetInterface;
 import cn.nukkit.network.SourceInterface;
-import cn.nukkit.network.protocol.BatchPacket;
-import cn.nukkit.network.protocol.DataPacket;
-import cn.nukkit.network.protocol.PlayerListPacket;
-import cn.nukkit.network.protocol.ProtocolInfo;
+import cn.nukkit.network.protocol.*;
 import cn.nukkit.network.query.QueryHandler;
 import cn.nukkit.network.rcon.RCON;
 import cn.nukkit.permission.BanEntry;
@@ -90,6 +87,8 @@ import io.netty.buffer.ByteBuf;
 import io.sentry.Sentry;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectList;
 import lombok.extern.log4j.Log4j2;
@@ -100,12 +99,14 @@ import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.Iq80DBFactory;
 import org.jetbrains.annotations.NotNull;
 
+import java.awt.*;
 import java.io.*;
 import java.net.*;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.security.*;
+import java.util.List;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -579,6 +580,24 @@ public class Server {
      * Enable forced safety enchantments (up max lvl)
      */
     public boolean forcedSafetyEnchant;
+    /**
+     * Enable vibrant visuals
+     * @since 1.21.80
+     */
+    public boolean enableVibrantVisuals;
+    /**
+     * Enable raytracing
+     */
+    public boolean enableRaytracing;
+
+    /**
+     * Enable NetEase Client Support
+     */
+    public boolean netEaseMode;
+    /**
+     * Only allow NetEase clients to join the server
+     */
+    public boolean onlyNetEaseMode;
 
     Server(final String filePath, String dataPath, String pluginPath, boolean loadPlugins, boolean debug) {
         Preconditions.checkState(instance == null, "Already initialized!");
@@ -711,13 +730,17 @@ public class Server {
         GlobalBlockPalette.init();
         RuntimeItems.init();
         Item.init();
+        //noinspection ResultOfMethodCallIgnored
         EnumBiome.values();
         Effect.init();
         Potion.init();
         Attribute.init();
         DispenseBehaviorRegister.init();
         CustomBlockManager.init(this);
-        GlobalBlockPalette.getOrCreateRuntimeId(ProtocolInfo.CURRENT_PROTOCOL, 0, 0);
+        GlobalBlockPalette.getOrCreateRuntimeId(GameVersion.getLastVersion(), 0, 0);
+        BiomeDefinitionListPacket.getCachedPacket(GameVersion.getLastVersion());
+        //noinspection ResultOfMethodCallIgnored
+        TrimDataPacket.getCachedPacket(GameVersion.getLastVersion());
 
         // Convert legacy data before plugins get the chance to mess with it
         try {
@@ -1253,6 +1276,7 @@ public class Server {
         }
     }
 
+    @Deprecated
     public void onPlayerCompleteLoginSequence(Player player) {
         this.playerList.put(player.getUniqueId(), player);
         this.updatePlayerListData(player.getUniqueId(), player.getId(), player.getDisplayName(), player.getSkin(), player.getLoginChainData().getXUID());
@@ -1264,7 +1288,7 @@ public class Server {
 
     public void addOnlinePlayer(Player player) {
         this.playerList.put(player.getUniqueId(), player);
-        this.updatePlayerListData(player.getUniqueId(), player.getId(), player.getDisplayName(), player.getSkin(), player.getLoginChainData().getXUID());
+        player.updatePlayerListData(false);
     }
 
     public void removeOnlinePlayer(Player player) {
@@ -1294,15 +1318,19 @@ public class Server {
         this.updatePlayerListData(uuid, entityId, name, skin, "", players);
     }
 
-    public void updatePlayerListData(UUID uuid, long entityId, String name, Skin skin, String xboxUserId, Player[] players) {
-        PlayerListPacket pk = new PlayerListPacket();
-        pk.type = PlayerListPacket.TYPE_ADD;
-        pk.entries = new PlayerListPacket.Entry[]{new PlayerListPacket.Entry(uuid, entityId, name, skin, xboxUserId)};
-        this.batchPackets(players, new DataPacket[]{pk}); // This is sent "directly" so it always gets thru before possible TYPE_REMOVE packet for NPCs etc.
-    }
-
     public void updatePlayerListData(UUID uuid, long entityId, String name, Skin skin, String xboxUserId, Collection<Player> players) {
         this.updatePlayerListData(uuid, entityId, name, skin, xboxUserId, players.toArray(Player.EMPTY_ARRAY));
+    }
+
+    public void updatePlayerListData(UUID uuid, long entityId, String name, Skin skin, String xboxUserId, Player[] players) {
+        this.updatePlayerListData(new PlayerListPacket.Entry(uuid, entityId, name, skin, xboxUserId, Color.WHITE), players);
+    }
+
+    public void updatePlayerListData(PlayerListPacket.Entry playerListEntry, Player[] players) {
+        PlayerListPacket pk = new PlayerListPacket();
+        pk.type = PlayerListPacket.TYPE_ADD;
+        pk.entries = new PlayerListPacket.Entry[]{playerListEntry};
+        this.batchPackets(players, new DataPacket[]{pk}); // This is sent "directly" so it always gets thru before possible TYPE_REMOVE packet for NPCs etc.
     }
 
     public void removePlayerListData(UUID uuid) {
@@ -1336,7 +1364,8 @@ public class Server {
                         p.getId(),
                         p.getDisplayName(),
                         p.getSkin(),
-                        p.getLoginChainData().getXUID()))
+                        p.getLoginChainData().getXUID(),
+                        p.getLocatorBarColor()))
                 .toArray(PlayerListPacket.Entry[]::new);
         Object[][] splitArray = Utils.splitArray(array, 50);
         if (splitArray != null) {
@@ -1350,7 +1379,7 @@ public class Server {
     }
 
     public void sendRecipeList(Player player) {
-        BatchPacket cachedPacket = this.craftingManager.getCachedPacket(player.protocol);
+        BatchPacket cachedPacket = this.craftingManager.getCachedPacket(player.getGameVersion());
         if (cachedPacket != null) { // Don't send recipes if they wouldn't work anyways
             player.dataPacket(cachedPacket);
         }
@@ -2775,6 +2804,7 @@ public class Server {
      * @param players players
      * @return players sorted by protocol
      */
+    @Deprecated
     public static Int2ObjectMap<ObjectList<Player>> sortPlayers(Player[] players) {
         Int2ObjectMap<ObjectList<Player>> targets = new Int2ObjectOpenHashMap<>();
         for (Player player : players) {
@@ -2789,10 +2819,39 @@ public class Server {
      * @param players players
      * @return players sorted by protocol
      */
+    @Deprecated
     public static Int2ObjectMap<ObjectList<Player>> sortPlayers(Collection<Player> players) {
         Int2ObjectMap<ObjectList<Player>> targets = new Int2ObjectOpenHashMap<>();
         for (Player player : players) {
             targets.computeIfAbsent(player.protocol, i -> new ObjectArrayList<>()).add(player);
+        }
+        return targets;
+    }
+
+    /**
+     * Group players by game version
+     *
+     * @param players players
+     * @return players grouped by game version
+     */
+    public static Object2ObjectMap<GameVersion, ObjectList<Player>> groupPlayersByGameVersion(Player[] players) {
+        Object2ObjectMap<GameVersion, ObjectList<Player>> targets = new Object2ObjectOpenHashMap<>();
+        for (Player player : players) {
+            targets.computeIfAbsent(player.getGameVersion(), i -> new ObjectArrayList<>()).add(player);
+        }
+        return targets;
+    }
+
+    /**
+     * Group players by game version
+     *
+     * @param players players
+     * @return players grouped by game version
+     */
+    public static Object2ObjectMap<GameVersion, ObjectList<Player>> groupPlayersByGameVersion(Collection<Player> players) {
+        Object2ObjectMap<GameVersion, ObjectList<Player>> targets = new Object2ObjectOpenHashMap<>();
+        for (Player player : players) {
+            targets.computeIfAbsent(player.getGameVersion(), i -> new ObjectArrayList<>()).add(player);
         }
         return targets;
     }
@@ -2939,6 +2998,8 @@ public class Server {
         Entity.registerEntity("Allay", EntityAllay.class);
         Entity.registerEntity("Npc", EntityNPCEntity.class);
         Entity.registerEntity("Camel", EntityCamel.class);
+        Entity.registerEntity("HappyGhast", EntityHappyGhast.class);
+        Entity.registerEntity("CopperGolem", EntityCopperGolem.class);
         //Vehicles
         Entity.registerEntity("MinecartRideable", EntityMinecartEmpty.class);
         Entity.registerEntity("MinecartChest", EntityMinecartChest.class);
@@ -3006,6 +3067,25 @@ public class Server {
      */
     public boolean isNetherAllowed() {
         return this.netherEnabled;
+    }
+
+
+    /**
+     * Is vibrant visuals enabled on this server
+     *
+     * @return vibrant visuals enabled
+     */
+    public boolean isVibrantVisualsEnabled() {
+        return this.enableVibrantVisuals;
+    }
+
+    /**
+     * Is ray tracing enabled on this server
+     *
+     * @return ray tracing enabled
+     */
+    public boolean isRaytracingEnabled() {
+        return this.enableRaytracing;
     }
 
     public boolean isWaterdogCapable() {
@@ -3087,7 +3167,6 @@ public class Server {
         this.pvpEnabled = this.getPropertyBoolean("pvp", true);
         this.announceAchievements = this.getPropertyBoolean("announce-player-achievements", false);
         this.spawnEggsEnabled = this.getPropertyBoolean("spawn-eggs", true);
-        this.forcedSafetyEnchant = this.getPropertyBoolean("forced-safety-enchant", true);
         this.xpBottlesOnCreative = this.getPropertyBoolean("xp-bottles-on-creative", false);
         this.shouldSavePlayerData = this.getPropertyBoolean("save-player-data", true);
         this.mobsFromBlocks = this.getPropertyBoolean("block-listener", true);
@@ -3180,6 +3259,12 @@ public class Server {
         this.enableNewChickenEggsLaying = this.getPropertyBoolean("enable-new-chicken-eggs-laying", true);
         this.rakPacketLimit = this.getPropertyInt("rak-packet-limit", RakConstants.DEFAULT_PACKET_LIMIT);
         this.enableRakSendCookie = this.getPropertyBoolean("enable-rak-send-cookie", true);
+        this.forcedSafetyEnchant = this.getPropertyBoolean("forced-safety-enchant", true);
+        this.enableVibrantVisuals = this.getPropertyBoolean("enable-vibrant-visuals", true);
+        this.enableRaytracing = this.getPropertyBoolean("enable-raytracing", true);
+
+        this.netEaseMode = this.getPropertyBoolean("netease-client-support", false);
+        this.onlyNetEaseMode = this.getPropertyBoolean("only-allow-netease-client", false);
     }
 
     /**
@@ -3245,7 +3330,6 @@ public class Server {
             put("space-name-mode", "ignore");
             put("xp-bottles-on-creative", true);
             put("spawn-eggs", true);
-            put("forced-safety-enchant", true);
             put("mob-ai", true);
             put("entity-auto-spawn-task", true);
             put("entity-despawn-task", true);
@@ -3333,6 +3417,12 @@ public class Server {
             put("enable-raw-ores", true);
             put("enable-new-paintings", true);
             put("enable-new-chicken-eggs-laying", true);
+            put("forced-safety-enchant", true);
+            put("enable-vibrant-visuals", true);
+            put("enable-raytracing", true);
+
+            put("netease-client-support", false);
+            put("only-allow-netease-client", false);
         }
     }
 

@@ -1,5 +1,6 @@
 package cn.nukkit.network.protocol;
 
+import cn.nukkit.Server;
 import cn.nukkit.resourcepacks.ResourcePack;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import lombok.Getter;
@@ -24,7 +25,7 @@ public class ResourcePacksInfoPacket extends DataPacket {
     /**
      * @since v818 1.21.90
      */
-    public boolean forceDisableVibrantVisuals;
+    public boolean forceDisableVibrantVisuals = !Server.getInstance().isVibrantVisualsEnabled();
     public boolean scripting;
     public boolean forceServerPacks;
     public ResourcePack[] behaviourPackEntries = ResourcePack.EMPTY_ARRAY;
@@ -35,6 +36,7 @@ public class ResourcePacksInfoPacket extends DataPacket {
      */
     @Getter
     @Setter
+    @SuppressWarnings("dep-ann")
     private List<CDNEntry> CDNEntries = new ObjectArrayList<>();
     /**
      * @since v766
@@ -58,11 +60,11 @@ public class ResourcePacksInfoPacket extends DataPacket {
         }
         if (this.protocol >= ProtocolInfo.v1_9_0) {
             this.putBoolean(this.scripting);
-            if (this.protocol >= ProtocolInfo.v1_21_90) {
-                this.putBoolean(this.forceDisableVibrantVisuals);
-            }
             if (this.protocol >= ProtocolInfo.v1_17_10 && this.protocol < ProtocolInfo.v1_21_30) {
                 this.putBoolean(this.forceServerPacks);
+            }
+            if (this.protocol >= ProtocolInfo.v1_21_90) {
+                this.putBoolean(this.forceDisableVibrantVisuals);
             }
         }
         if (this.protocol >= ProtocolInfo.v1_21_50) {
@@ -125,7 +127,7 @@ public class ResourcePacksInfoPacket extends DataPacket {
                         if (protocol >= ProtocolInfo.v1_21_20) {
                             this.putBoolean(entry.isAddonPack());
                         }
-                        this.putBoolean(false); // raytracing capable
+                        this.putBoolean(Server.getInstance().isRaytracingEnabled()); // raytracing capable
                         if (protocol >= ProtocolInfo.v1_21_40) {
                             this.putString(entry.getCDNUrl());
                         }
