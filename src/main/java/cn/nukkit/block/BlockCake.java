@@ -9,6 +9,7 @@ import cn.nukkit.math.AxisAlignedBB;
 import cn.nukkit.math.BlockFace;
 import cn.nukkit.math.SimpleAxisAlignedBB;
 import cn.nukkit.utils.BlockColor;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * @author Nukkit Project Team
@@ -81,7 +82,7 @@ public class BlockCake extends BlockTransparentMeta {
     }
 
     @Override
-    public boolean place(Item item, Block block, Block target, BlockFace face, double fx, double fy, double fz, Player player) {
+    public boolean place(@NotNull Item item, @NotNull Block block, @NotNull Block target, @NotNull BlockFace face, double fx, double fy, double fz, Player player) {
         if (down().getId() != Block.AIR) {
             getLevel().setBlock(block, this, true, true);
 
@@ -120,7 +121,7 @@ public class BlockCake extends BlockTransparentMeta {
         }
         if (player != null && player.canEat(false)) {
             if (getDamage() <= 0x06) setDamage(getDamage() + 1);
-            if (getDamage() >= 0x06) {
+            if (getDamage() > 0x06) {
                 getLevel().setBlock(this, Block.get(BlockID.AIR), true);
             } else {
                 Food.getByRelative(this).eatenBy(player);

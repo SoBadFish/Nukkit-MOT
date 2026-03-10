@@ -64,7 +64,7 @@ public class BlockNoteblock extends BlockSolid implements BlockEntityHolder<Bloc
     }
 
     @Override
-    public boolean place(Item item, Block block, Block target, BlockFace face, double fx, double fy, double fz, Player player) {
+    public boolean place(@NotNull Item item, @NotNull Block block, @NotNull Block target, @NotNull BlockFace face, double fx, double fy, double fz, Player player) {
         this.getLevel().setBlock(block, this, true);
         this.createBlockEntity();
         return true;
@@ -279,10 +279,10 @@ public class BlockNoteblock extends BlockSolid implements BlockEntityHolder<Bloc
         DRUM(Sound.NOTE_SNARE),
         STICKS(Sound.NOTE_HAT),
         BASS(Sound.NOTE_BASS),
-        GLOCKENSPIEL(Sound.NOTE_BELL),
         FLUTE(Sound.NOTE_FLUTE),
-        CHIME(Sound.NOTE_CHIME),
+        GLOCKENSPIEL(Sound.NOTE_BELL),
         GUITAR(Sound.NOTE_GUITAR),
+        CHIME(Sound.NOTE_CHIME),
         XYLOPHONE(Sound.NOTE_XYLOPHONE),
         VIBRAPHONE(Sound.NOTE_IRON_XYLOPHONE),
         COW_BELL(Sound.NOTE_COW_BELL),

@@ -11,6 +11,7 @@ import cn.nukkit.nbt.tag.CompoundTag;
 import cn.nukkit.utils.ChunkException;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
+import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Constructor;
 
@@ -57,6 +58,7 @@ public abstract class BlockEntity extends Position {
     public static final String TARGET = "Target";
     public static final String BRUSHABLE_BLOCK = "BrushableBlock";
     public static final String CONDUIT = "Conduit";
+    public static final String HANGING_SIGN = "HangingSign";
 
     // Not a vanilla block entity
     public static final String PERSISTENT_CONTAINER = "PersistentContainer";
@@ -165,6 +167,7 @@ public abstract class BlockEntity extends Position {
         this.namedTag.putBoolean("isMovable", this.movable);
     }
 
+    @Nullable
     public CompoundTag getCleanedNBT() {
         this.saveNBT();
         CompoundTag tag = this.namedTag.clone();

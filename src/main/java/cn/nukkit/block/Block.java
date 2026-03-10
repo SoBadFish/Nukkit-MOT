@@ -45,6 +45,8 @@ import static cn.nukkit.utils.Utils.dynamic;
 @Log4j2
 public abstract class Block extends Position implements Metadatable, Cloneable, AxisAlignedBB, BlockID {
 
+    public static final Block[] EMPTY_ARRAY = new Block[0];
+
     public static final int ID_BITS = dynamic(11);
     public static final int MAX_BLOCK_ID = dynamic(1 << ID_BITS);
     public static final int ID_MASK = dynamic(MAX_BLOCK_ID - 1);
@@ -165,10 +167,12 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
         }
     }
 
+    @NotNull
     public static Block get(int id) {
         return get(id, null);
     }
 
+    @NotNull
     public static Block get(int id, Integer meta) {
         if (id < 0) {
             id = 255 - id;
@@ -210,10 +214,12 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
         }
     }
 
+    @NotNull
     public static Block get(int id, Integer meta, Position pos) {
         return get(id, meta, pos, 0);
     }
 
+    @NotNull
     public static Block get(int id, Integer meta, Position pos, int layer) {
         if (id < 0) {
             id = 255 - id;
@@ -256,13 +262,14 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
         return block;
     }
 
+    @NotNull
     public static Block get(int id, int data) {
         if (id < 0) {
             id = 255 - id;
         }
 
         if (id >= CustomBlockManager.LOWEST_CUSTOM_BLOCK_ID) {
-            return CustomBlockManager.get().getBlock(id, 0);
+            return CustomBlockManager.get().getBlock(id, data);
         }
 
         int fullId = id << DATA_BITS;
@@ -286,19 +293,21 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
         }
     }
 
+    @NotNull
     public static Block get(int fullId, Level level, int x, int y, int z) {
         return get(fullId, level, x, y, z, 0);
     }
 
+    @NotNull
     public static Block get(int fullId, Level level, int x, int y, int z, int layer) {
-        int id = fullId << DATA_BITS;
+        int id = fullId >> DATA_BITS;
 
         Block block;
         if (id >= CustomBlockManager.LOWEST_CUSTOM_BLOCK_ID) {
-            block = CustomBlockManager.get().getBlock(id, 0);
+            block = CustomBlockManager.get().getBlock(id, fullId & DATA_MASK);
         } else {
             if (fullId >= fullList.length || fullList[fullId] == null) {
-                int meta = fullId & DATA_BITS;
+                int meta = fullId & DATA_MASK;
                 log.debug("Found an unknown BlockId:Meta combination: {}:{}", id, meta);
                 BlockUnknown blockUnknown = new BlockUnknown(id, meta);
                 fullList[fullId] = blockUnknown;
@@ -310,18 +319,20 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
         block.y = y;
         block.z = z;
         block.level = level;
-        //block.layer = layer;
+        block.layer = layer;
         return block;
     }
 
+    @NotNull
     public static Block get(int id, int meta, Level level, int x, int y, int z) {
         return get(id, meta, level, x, y, z, 0);
     }
 
+    @NotNull
     public static Block get(int id, int meta, Level level, int x, int y, int z, int layer) {
         Block block;
         if (id >= CustomBlockManager.LOWEST_CUSTOM_BLOCK_ID) {
-            block = CustomBlockManager.get().getBlock(id, 0);
+            block = CustomBlockManager.get().getBlock(id, meta);
         } else {
             if (meta <= DATA_SIZE) {
                 int index = id << DATA_BITS | meta;
@@ -354,37 +365,57 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
 
     public static int getBlockLight(int blockId) {
         if (blockId >= CustomBlockManager.LOWEST_CUSTOM_BLOCK_ID) {
-            return light[0]; // TODO: just temporary
+            return CustomBlockManager.get().getCachedLight(blockId);
         }
         return light[blockId];
     }
 
     public static int getBlockLightFilter(int blockId) {
         if (blockId >= CustomBlockManager.LOWEST_CUSTOM_BLOCK_ID) {
-            return lightFilter[0]; // TODO: just temporary
+            return CustomBlockManager.get().getCachedLightFilter(blockId);
         }
         return lightFilter[blockId];
     }
 
     public static boolean isBlockSolidById(int blockId) {
         if (blockId >= CustomBlockManager.LOWEST_CUSTOM_BLOCK_ID) {
-            return solid[1]; // TODO: just temporary
+            return CustomBlockManager.get().getCachedSolid(blockId);
         }
         return solid[blockId];
     }
 
     public static boolean isBlockTransparentById(int blockId) {
         if (blockId >= CustomBlockManager.LOWEST_CUSTOM_BLOCK_ID) {
-            return transparent[1]; // TODO: just temporary
+            return CustomBlockManager.get().getCachedTransparent(blockId);
         }
         return transparent[blockId];
+    }
+
+    public static boolean getBlockDiffusesSkyLight(int blockId) {
+        if (blockId >= CustomBlockManager.LOWEST_CUSTOM_BLOCK_ID) {
+            return CustomBlockManager.get().getCachedDiffusesSkyLight(blockId);
+        }
+        return diffusesSkyLight[blockId];
+    }
+
+    /**
+     * 计算自定义方块的光过滤值（与 lightFilter[] 数组对同类型原版方块的处理保持一致）
+     * Compute light filter value for a custom block, consistent with how lightFilter[] handles equivalent vanilla block types.
+     */
+    public static int computeCustomBlockLightFilter(Block block) {
+        if (block.isTransparent()) {
+            return (block instanceof BlockLiquid || block instanceof BlockIce) ? 2 : 1;
+        } else if (block instanceof BlockSlime) {
+            return 1;
+        }
+        return 15;
     }
 
     public static Block fromFullId(int fullId) {
         return get(fullId >> DATA_BITS, fullId & DATA_MASK);
     }
 
-    public boolean place(Item item, Block block, Block target, BlockFace face, double fx, double fy, double fz, Player player) {
+    public boolean place(@NotNull Item item, @NotNull Block block, @NotNull Block target, @NotNull BlockFace face, double fx, double fy, double fz, @Nullable Player player) {
         return this.canPlaceOn(block.down(), target) && this.getLevel().setBlock(this, this, true, true);
     }
 
@@ -547,6 +578,10 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
         return false;
     }
 
+    public boolean hasDynamicCollision() {
+        return false;
+    }
+
     public boolean hasEntityCollision() {
         return false;
     }
@@ -697,7 +732,7 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
         if (toolType == ItemTool.TYPE_SWORD) return blockId == Block.COBWEB ? 15.0 : 1.0;
         if (toolType == ItemTool.TYPE_SHEARS) {
             boolean isLeaves = blockId == LEAVES || blockId == LEAVES2 || blockId == AZALEA_LEAVES
-                    || blockId == AZALEA_LEAVES_FLOWERED || blockId == MANGROVE_LEAVES || blockId == CHERRY_LEAVES;
+                    || blockId == AZALEA_LEAVES_FLOWERED || blockId == MANGROVE_LEAVES || blockId == CHERRY_LEAVES || blockId == PALE_OAK_LEAVES;
             if (blockId == Block.WOOL || isLeaves) {
                 return 5.0;
             } else if (blockId == COBWEB) {
@@ -746,6 +781,7 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
                 case AZALEA_LEAVES_FLOWERED:
                 case MANGROVE_LEAVES:
                 case CHERRY_LEAVES:
+                case PALE_OAK_LEAVES:
                     return ItemTool.TYPE_SHEARS;
             }
         }
@@ -760,7 +796,7 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
 
     private static boolean correctTool0(int blockToolType, Item item, int blockId) {
         boolean isLeaves = blockId == LEAVES || blockId == LEAVES2 || blockId == AZALEA_LEAVES
-                || blockId == AZALEA_LEAVES_FLOWERED || blockId == MANGROVE_LEAVES || blockId == CHERRY_LEAVES;
+                || blockId == AZALEA_LEAVES_FLOWERED || blockId == MANGROVE_LEAVES || blockId == CHERRY_LEAVES || blockId == PALE_OAK_LEAVES;
 
         if (item.isShears() && (blockId == COBWEB || isLeaves)) {
             return true;
@@ -831,9 +867,9 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
             hasAquaAffinity = Optional.ofNullable(player.getInventory().getHelmet().getEnchantment(Enchantment.ID_WATER_WORKER))
                     .map(Enchantment::getLevel).map(l -> l >= 1).orElse(false);
             hasteEffectLevel = Optional.ofNullable(player.getEffect(Effect.HASTE))
-                    .map(Effect::getAmplifier).orElse(0);
+                    .map(Effect::getAmplifier).orElse(-1) + 1;
             miningFatigueLevel = Optional.ofNullable(player.getEffect(Effect.MINING_FATIGUE))
-                    .map(Effect::getAmplifier).orElse(0);
+                    .map(Effect::getAmplifier).orElse(-1) + 1;
         }
 
 
@@ -850,7 +886,7 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
                     .map(Enchantment::getLevel).orElse(0);
 
             if (canHarvest && efficiencyLevel > 0) {
-                speedMultiplier += efficiencyLevel ^ 2 + 1;
+                speedMultiplier += efficiencyLevel * efficiencyLevel + 1;
             }
 
             if (hasConduitPower) hasteEffectLevel = Integer.max(hasteEffectLevel, 2);
@@ -861,7 +897,7 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
         }
 
         if (miningFatigueLevel > 0) {
-            speedMultiplier /= 3 ^ miningFatigueLevel;
+            speedMultiplier *= Math.pow(0.3, miningFatigueLevel);
         }
 
         seconds /= speedMultiplier;
@@ -889,7 +925,7 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
                 || item.isShears() && (
                         blockId == COBWEB || blockId == LEAVES || blockId == LEAVES2
                                 || blockId == AZALEA_LEAVES || blockId == AZALEA_LEAVES_FLOWERED
-                                || blockId == MANGROVE_LEAVES || blockId == CHERRY_LEAVES);
+                                || blockId == MANGROVE_LEAVES || blockId == CHERRY_LEAVES || blockId == PALE_OAK_LEAVES);
         boolean canHarvestWithHand = canHarvestWithHand();
         int itemToolType = toolType0(item, blockId);
         int itemTier = item.getTier();
@@ -1423,14 +1459,17 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
         if (canConnectToFullSolid(down)) {
             return true;
         }
+
         switch (down.getId()) {
             case SCAFFOLDING:
             case HOPPER_BLOCK:
                 return true;
         }
-        if (down instanceof BlockSlab) {
-            return ((BlockSlab) down).hasTopBit();
+
+        if (down instanceof BlockSlab slab) {
+            return slab.hasTopBit();
         }
+
         return down instanceof BlockTrapdoor && ((BlockTrapdoor) down).isTop() && !((BlockTrapdoor) down).isOpen();
     }
 
@@ -1450,10 +1489,73 @@ public abstract class Block extends Position implements Metadatable, Cloneable, 
     }
 
     /**
-     * Returns true for WATER and STILL_WATER, false for others
+     * Returns true for WATER or STILL_WATER, false for others
      */
     public static boolean isWater(int id) {
-        return id == WATER || id == STILL_WATER;
+        return BlockTypes.isWater(id);
+    }
+
+    /**
+     * Returns true for LAVA or STILL_LAVA, false for others
+     */
+    public static boolean isLava(int id) {
+        return BlockTypes.isLava(id);
+    }
+
+    /**
+     * Returns true for SLAB, false for others
+     */
+    public static boolean isSlab(int id) {
+        return BlockTypes.isSlab(id);
+    }
+
+    /**
+     * Returns true for STAIRS, false for others
+     */
+    public static boolean isStairs(int id) {
+        return BlockTypes.isStairs(id);
+    }
+
+    /**
+     * Returns true for PRESSURE_PLATE, false for others
+     */
+    public static boolean isPressurePlate(int id) {
+        return BlockTypes.isPressurePlate(id);
+    }
+
+    /**
+     * Returns true for BUTTON, false for others
+     */
+    public static boolean isButton(int id) {
+        return BlockTypes.isButton(id);
+    }
+
+    /**
+     * Returns true for FENCE, false for others
+     */
+    public static boolean isFence(int id) {
+        return BlockTypes.isFence(id);
+    }
+
+    /**
+     * Returns true for FENCE_GATE, false for others
+     */
+    public static boolean isFenceGate(int id) {
+        return BlockTypes.isFenceGate(id);
+    }
+
+    /**
+     * Returns true for TRAPDOOR, false for others
+     */
+    public static boolean isTrapdoor(int id) {
+        return BlockTypes.isTrapdoor(id);
+    }
+
+    /**
+     * Returns true for DOOR, false for others
+     */
+    public static boolean isDoor(int id) {
+        return BlockTypes.isDoor(id);
     }
 
     public boolean isSuspiciousBlock() {

@@ -52,9 +52,14 @@ public class RuntimeItems {
     private static RuntimeItemMapping mapping800;
     private static RuntimeItemMapping mapping818;
     private static RuntimeItemMapping mapping827;
+    private static RuntimeItemMapping mapping844;
+    private static RuntimeItemMapping mapping859;
+    private static RuntimeItemMapping mapping898;
+    private static RuntimeItemMapping mapping924;
 
     private static RuntimeItemMapping mapping_netease_630;
     private static RuntimeItemMapping mapping_netease_686;
+    private static RuntimeItemMapping mapping_netease_766;
 
     public static RuntimeItemMapping[] VALUES;
 
@@ -131,9 +136,14 @@ public class RuntimeItems {
         mapping800 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_21_80);
         mapping818 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_21_90);
         mapping827 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_21_100);
+        mapping844 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_21_110);
+        mapping859 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_21_120);
+        mapping898 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_21_130);
+        mapping924 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_26_0);
 
         mapping_netease_630 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_20_50_NETEASE);
         mapping_netease_686 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_21_2_NETEASE);
+        mapping_netease_766 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_21_50_NETEASE);
 
         VALUES = new RuntimeItemMapping[]{
                 mapping361,
@@ -166,9 +176,14 @@ public class RuntimeItems {
                 mapping800,
                 mapping818,
                 mapping827,
+                mapping844,
+                mapping859,
+                mapping898,
+                mapping924,
                 // NetEase
                 mapping_netease_630,
-                mapping_netease_686
+                mapping_netease_686,
+                mapping_netease_766
         };
     }
 
@@ -182,8 +197,15 @@ public class RuntimeItems {
         if (gameVersion.isNetEase()) {
             return getMappingNetEase(protocolId);
         }
-
-        if (protocolId >= ProtocolInfo.v1_21_100) {
+        if (protocolId >= ProtocolInfo.v1_26_0) {
+            return mapping924;
+        } else if (protocolId >= ProtocolInfo.v1_21_130_28) {
+            return mapping898;
+        } else if (protocolId >= ProtocolInfo.v1_21_120) {
+            return mapping859;
+        } else if (protocolId >= ProtocolInfo.v1_21_110_26) {
+            return mapping844;
+        } else if (protocolId >= ProtocolInfo.v1_21_100) {
             return mapping827;
         } else if (protocolId >= ProtocolInfo.v1_21_90) {
             return mapping818;
@@ -246,7 +268,9 @@ public class RuntimeItems {
     }
 
     private static RuntimeItemMapping getMappingNetEase(int protocolId) {
-        if (protocolId >= ProtocolInfo.v1_21_2) {
+        if (protocolId >= GameVersion.V1_21_50_NETEASE.getProtocol()) {
+            return mapping_netease_766;
+        } else if (protocolId >= GameVersion.V1_21_2_NETEASE.getProtocol()) {
             return mapping_netease_686;
         }
         return mapping_netease_630;
@@ -254,6 +278,20 @@ public class RuntimeItems {
 
     public static int getLegacyIdFromLegacyString(String identifier) {
         return legacyString2LegacyInt.getOrDefault(identifier, -1);
+    }
+
+    /**
+     * 注册自定义方块的标识符到旧ID的映射
+     * Register a custom block's identifier to legacy ID mapping
+     * <p>
+     * 此方法使Item.fromString()能够识别和创建自定义方块物品
+     * This is needed for Item.fromString() to work with custom blocks
+     *
+     * @param identifier 自定义方块的标识符 / custom block's identifier
+     * @param legacyId 旧物品ID / legacy item ID
+     */
+    public static void registerCustomBlockLegacyId(String identifier, int legacyId) {
+        legacyString2LegacyInt.put(identifier, legacyId);
     }
 
     @Data

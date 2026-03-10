@@ -11,6 +11,7 @@ import cn.nukkit.level.Level;
 import cn.nukkit.math.BlockFace;
 import cn.nukkit.utils.BlockColor;
 import cn.nukkit.utils.Utils;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
 
@@ -85,7 +86,7 @@ public class BlockLeaves extends BlockTransparentMeta {
     }
 
     @Override
-    public boolean place(Item item, Block block, Block target, BlockFace face, double fx, double fy, double fz, Player player) {
+    public boolean place(@NotNull Item item, @NotNull Block block, @NotNull Block target, @NotNull BlockFace face, double fx, double fy, double fz, Player player) {
         setPersistent(true);
         this.getLevel().setBlock(this, this, true);
         return true;
@@ -242,5 +243,10 @@ public class BlockLeaves extends BlockTransparentMeta {
             case WOOD_BARK -> (damage & BlockWoodBark.STRIPPED_BIT) == 0;
             default -> false;
         };
+    }
+
+    @Override
+    public boolean diffusesSkyLight() {
+        return true;
     }
 }

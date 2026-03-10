@@ -4,6 +4,7 @@ import cn.nukkit.GameVersion;
 import cn.nukkit.Nukkit;
 import cn.nukkit.Server;
 import cn.nukkit.block.Block;
+import cn.nukkit.block.BlockID;
 import cn.nukkit.item.RuntimeItems.MappingEntry;
 import cn.nukkit.item.customitem.CustomItem;
 import cn.nukkit.item.customitem.CustomItemDefinition;
@@ -13,6 +14,7 @@ import cn.nukkit.nbt.tag.CompoundTag;
 import cn.nukkit.network.protocol.ItemComponentPacket;
 import cn.nukkit.network.protocol.ProtocolInfo;
 import cn.nukkit.utils.BinaryStream;
+import cn.nukkit.utils.NetEaseConverter;
 import cn.nukkit.utils.Utils;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -64,14 +66,33 @@ public class RuntimeItemMapping {
         this.protocolId = gameVersion.getProtocol();
         this.gameVersion = gameVersion;
         String itemStatesFile = "runtime_item_states_" + protocolId + ".json";
+        boolean useNetEaseConversion = false;
+
         if (gameVersion.isNetEase()) {
-            itemStatesFile = "runtime_item_states_netease_" + protocolId + ".json";
+            String neteaseFile = "runtime_item_states_netease_" + protocolId + ".json";
+            InputStream neteaseStream = Server.class.getClassLoader().getResourceAsStream(neteaseFile);
+            if (neteaseStream != null) {
+                itemStatesFile = neteaseFile;
+                try {
+                    neteaseStream.close();
+                } catch (Exception ignored) {
+                }
+            } else {
+                log.debug("NetEase resource file not found: {}, will convert from standard version", neteaseFile);
+                useNetEaseConversion = true;
+            }
         }
+
         InputStream stream = Server.class.getClassLoader().getResourceAsStream(itemStatesFile);
         if (stream == null) {
             throw new AssertionError("Unable to load " + itemStatesFile);
         }
         JsonArray json = JsonParser.parseReader(new InputStreamReader(stream, StandardCharsets.UTF_8)).getAsJsonArray();
+
+        if (useNetEaseConversion) {
+            json = NetEaseConverter.convertItemStates(json);
+            log.info("Converted {} item states to NetEase version", json.size());
+        }
 
         CompoundTag itemComponents = null;
         if (protocolId >= ProtocolInfo.v1_21_60) {
@@ -274,7 +295,8 @@ public class RuntimeItemMapping {
                 if (Server.getInstance().enableExperimentMode && protocolId >= ProtocolInfo.v1_16_100) {
                     paletteBuffer.putString(entry.getIdentifier());
                     paletteBuffer.putLShort(entry.getRuntimeId());
-                    paletteBuffer.putBoolean(true); // Component item
+                    var def = Item.getCustomItemDefinition().get(entry.getIdentifier());
+                    paletteBuffer.putBoolean(def != null && def.isComponentBased());
                 }
             } else {
                 paletteBuffer.putString(entry.getIdentifier());
@@ -372,6 +394,10 @@ public class RuntimeItemMapping {
                 }
                 damage = fullId & Block.DATA_MASK;
             }
+        }
+
+        if (legacyId == BlockID.RED_MUSHROOM_BLOCK || legacyId == BlockID.BROWN_MUSHROOM_BLOCK) {
+            damage = 14;
         }
 
         int count = json.has("count") ? json.get("count").getAsInt() : 1;

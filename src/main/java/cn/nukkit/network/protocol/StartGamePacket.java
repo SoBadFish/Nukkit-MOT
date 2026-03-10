@@ -3,6 +3,7 @@ package cn.nukkit.network.protocol;
 import cn.nukkit.Server;
 import cn.nukkit.block.custom.CustomBlockDefinition;
 import cn.nukkit.block.custom.CustomBlockManager;
+import cn.nukkit.block.custom.serializer.CustomBlockDefinitionSerializer;
 import cn.nukkit.item.RuntimeItems;
 import cn.nukkit.level.GameRules;
 import cn.nukkit.level.GlobalBlockPalette;
@@ -72,7 +73,7 @@ public class StartGamePacket extends DataPacket {
     public int spawnY;
     public int spawnZ;
     public boolean hasAchievementsDisabled = true;
-    public boolean worldEditor;
+    public int editorWorldType;
     public int dayCycleStopTime = -1;
     public boolean eduMode = false;
     public int eduEditionOffer = 0;
@@ -183,7 +184,9 @@ public class StartGamePacket extends DataPacket {
     public String ownerIdentifier = "";
     /**
      * @since v827
+     * @deprecated v897
      */
+    @SuppressWarnings("dep-ann")
     public boolean tickDeathSystemsEnabled;
 
     @Override
@@ -224,7 +227,7 @@ public class StartGamePacket extends DataPacket {
         this.putBlockVector3(this.spawnX, this.spawnY, this.spawnZ);
         this.putBoolean(this.hasAchievementsDisabled);
         if (protocol >= ProtocolInfo.v1_19_10) {
-            this.putBoolean(this.worldEditor);
+            this.putVarInt(this.editorWorldType);
             if (protocol >= ProtocolInfo.v1_19_80) {
                 this.putBoolean(this.createdInEditor);
                 this.putBoolean(this.exportedFromEditor);
@@ -259,7 +262,7 @@ public class StartGamePacket extends DataPacket {
         }
         this.putBoolean(this.commandsEnabled);
         this.putBoolean(this.isTexturePacksRequired);
-        this.putGameRules(protocol, gameRules);
+        this.putGameRules(this.gameVersion, gameRules, true);
         if (protocol >= ProtocolInfo.v1_16_100) {
             if (Server.getInstance().enableExperimentMode && !this.experiments.isEmpty()) {
                 this.putLInt(this.experiments.size()); // Experiment count
@@ -330,7 +333,7 @@ public class StartGamePacket extends DataPacket {
                 if (protocol >= ProtocolInfo.v1_19_20) {
                     this.putByte(this.chatRestrictionLevel);
                     this.putBoolean(this.disablePlayerInteractions);
-                    if (protocol >= ProtocolInfo.v1_21_0) {
+                    if (protocol >= ProtocolInfo.v1_21_0 && protocol < ProtocolInfo.v1_26_0) {
                         this.putString(this.serverId);
                         this.putString(this.worldId);
                         this.putString(this.scenarioId);
@@ -373,7 +376,8 @@ public class StartGamePacket extends DataPacket {
                     for (CustomBlockDefinition definition : this.blockDefinitions) {
                         this.putString(definition.identifier());
                         try {
-                            this.put(NBTIO.write(definition.nbt(), ByteOrder.LITTLE_ENDIAN, true));
+                            CompoundTag serializedNbt = CustomBlockDefinitionSerializer.serialize(definition.nbt(), protocol);
+                            this.put(NBTIO.write(serializedNbt, ByteOrder.LITTLE_ENDIAN, true));
                         } catch (Exception e) {
                              log.error("Error while encoding NBT data of CustomBlockDefinition", e);
                         }
@@ -411,10 +415,18 @@ public class StartGamePacket extends DataPacket {
                                 if (protocol >= ProtocolInfo.v1_19_80) {
                                     this.putBoolean(this.blockNetworkIdsHashed);
                                     if (protocol >= ProtocolInfo.v1_20_0_23) {
-                                        if (protocol >= ProtocolInfo.v1_21_100) {
+                                        if (protocol >= ProtocolInfo.v1_21_100 && protocol < ProtocolInfo.v1_21_130_28) {
                                             this.putBoolean(this.tickDeathSystemsEnabled);
                                         }
                                         this.putBoolean(this.networkPermissions.isServerAuthSounds());
+                                        if (protocol >= ProtocolInfo.v1_26_0) {
+                                            // v924: Server telemetry data
+                                            this.putBoolean(false); // containServerJoinInformation
+                                            this.putString(this.serverId); // serverIdentifier
+                                            this.putString(this.scenarioId); // scenarioIdentifier
+                                            this.putString(this.worldId); // worldIdentifier
+                                            this.putString(this.ownerIdentifier); // ownerIdentifier
+                                        }
                                     }
                                 }
                             }

@@ -2,11 +2,12 @@ package cn.nukkit.entity;
 
 import cn.nukkit.Player;
 import cn.nukkit.Server;
-import cn.nukkit.block.Block;
-import cn.nukkit.block.BlockCactus;
-import cn.nukkit.block.BlockMagma;
+import cn.nukkit.block.*;
+import cn.nukkit.entity.data.EntityMovementSpeedModifier;
 import cn.nukkit.entity.mob.EntityDrowned;
 import cn.nukkit.entity.mob.EntityWolf;
+import cn.nukkit.entity.passive.EntityIronGolem;
+import cn.nukkit.entity.passive.EntitySkeletonHorse;
 import cn.nukkit.entity.projectile.EntityProjectile;
 import cn.nukkit.entity.weather.EntityWeather;
 import cn.nukkit.event.entity.*;
@@ -18,7 +19,6 @@ import cn.nukkit.lang.TranslationContainer;
 import cn.nukkit.level.GameRule;
 import cn.nukkit.level.Sound;
 import cn.nukkit.level.format.FullChunk;
-import cn.nukkit.level.particle.BubbleParticle;
 import cn.nukkit.math.AxisAlignedBB;
 import cn.nukkit.math.NukkitMath;
 import cn.nukkit.math.Vector3;
@@ -63,6 +63,8 @@ public abstract class EntityLiving extends Entity implements EntityDamageable {
     private boolean blocking = false;
 
     protected final boolean isDrowned = this instanceof EntityDrowned;
+
+    private final Map<String, EntityMovementSpeedModifier> movementSpeedModifiers = new HashMap<>();
 
     @Override
     protected void initEntity() {
@@ -183,7 +185,7 @@ public abstract class EntityLiving extends Entity implements EntityDamageable {
         Vector3 normalizedVector = this.getPosition().subtract(entityPos).normalize();
         boolean blocked = (normalizedVector.x * direction.x) + (normalizedVector.z * direction.z) < 0.0;
         boolean knockBack = !(damager instanceof EntityProjectile);
-        EntityDamageBlockedEvent event = new EntityDamageBlockedEvent(this, source, knockBack, true);
+        EntityDamageBlockedEvent event = new EntityDamageBlockedEvent(this, damager, source, knockBack, true);
         if (!blocked || !source.canBeReducedByArmor() || damager instanceof EntityProjectile && ((EntityProjectile) damager).piercing > 0) {
             event.setCancelled();
         }
@@ -197,7 +199,7 @@ public abstract class EntityLiving extends Entity implements EntityDamageable {
             double deltaX = damager.getX() - this.getX();
             double deltaZ = damager.getZ() - this.getZ();
             ((EntityLiving) damager).attackTime = source.getAttackCooldown();
-            ((EntityLiving) damager).knockBack(this, 0, deltaX, deltaZ);
+            ((EntityLiving) damager).knockBack(this, 0, deltaX, deltaZ, 0.25);
         }
 
         onBlock(damager, source, event.getAnimation());
@@ -321,8 +323,36 @@ public abstract class EntityLiving extends Entity implements EntityDamageable {
                 this.resetFallDistance();
             }
 
-            if (inWater && !this.hasEffect(Effect.WATER_BREATHING)) {
-                if (this instanceof EntitySwimming || this.isDrowned || (this instanceof Player && (((Player) this).isCreative() || ((Player) this).isSpectator()))) {
+            if (this.level.getGameRules().getBoolean(GameRule.FIRE_DAMAGE) && !this.hasEffect(Effect.FIRE_RESISTANCE)) {
+                if (this.isInsideOfLava()) {
+                    this.inLavaTicks++;
+                    if ((this.inLavaTicks % 10) == 0) {
+                        Block lavaBlock = level.getBlock(this.getFloorX(), this.getFloorY(), this.getFloorZ());
+                        if (!(lavaBlock instanceof BlockLava)) {
+                            lavaBlock = lavaBlock.getLevelBlockAtLayer(1);
+                        }
+                        this.attack(new EntityDamageByBlockEvent(lavaBlock, this, DamageCause.LAVA, 4));
+                        this.inLavaTicks = 0;
+                    }
+                }
+
+                if (this.isInsideOfFire()) {
+                    this.inFireTicks++;
+                    if ((this.inFireTicks % 10) == 0) {
+                        Block fireBlock = level.getBlock(this.getFloorX(), this.getFloorY(), this.getFloorZ());
+                        int fireDamage = 1;
+                        if (fireBlock instanceof BlockSoulFire) {
+                            fireDamage = 2;
+                        }
+                        this.attack(new EntityDamageByBlockEvent(fireBlock, this, DamageCause.FIRE, fireDamage));
+                        this.inFireTicks = 0;
+                    }
+                }
+            }
+
+            boolean inBubbleColumn = this.isInsideBubbleColumn();
+            if (inWater && !inBubbleColumn && !this.hasEffect(Effect.WATER_BREATHING) && !this.hasEffect(Effect.CONDUIT_POWER)) {
+                if (this instanceof EntitySwimming || this.isDrowned || this instanceof EntitySkeletonHorse || this instanceof EntityIronGolem || this instanceof Player player && (player.isCreative() || player.isSpectator())) {
                     this.setAirTicks(400);
                 } else {
                     if (turtleTicks == 0) {
@@ -359,21 +389,15 @@ public abstract class EntityLiving extends Entity implements EntityDamageable {
             }
 
             // Check collisions with blocks
-            if (this instanceof Player) {
-                if (this.age % 5 == 0) {
-                    Block block = this.level.getBlock(getFloorX(), NukkitMath.floorDouble(this.y - 0.25), getFloorZ());
+            if ((this instanceof Player || this instanceof BaseEntity) && this.riding == null && this.age % (this instanceof Player ? 2 : 10) == 0) {
+                int floorY = NukkitMath.floorDouble(this.y - 0.25);
+                if (floorY != getFloorY()) {
+                    Block block = this.level.getBlock(this.chunk, getFloorX(), floorY, getFloorZ(), false);
                     if (block instanceof BlockCactus) {
                         block.onEntityCollide(this);
                     } else if (block instanceof BlockMagma) {
                         block.onEntityCollide(this);
-                        if (this.isInsideOfWater()) {
-                            this.level.addParticle(new BubbleParticle(this));
-                            this.setMotion(this.getMotion().add(0, -0.3, 0));
-                        }
-                    } /*else if (block == Block.SOUL_SAND && this.isInsideOfWater()) {
-                        this.level.addParticle(new BubbleParticle(this));
-                        this.setMotion(this.getMotion().add(0, 0.3, 0));
-                    }*/
+                    }
                 }
             }
 
@@ -386,10 +410,10 @@ public abstract class EntityLiving extends Entity implements EntityDamageable {
                 this.knockBackTime -= tickDiff;
             }
 
-            if (this.riding == null) {
-                Entity[] e = level.getNearbyEntities(this.boundingBox.grow(0.20000000298023224, 0.0D, 0.20000000298023224), this);
+            if (this.riding == null && this.age % 2 == 1 && !this.closed && this.isAlive()) {
+                Entity[] e = level.getNearbyEntities(this.boundingBox.grow(0.20000000298023224, 0.0D, 0.20000000298023224), this, false, true);
                 for (Entity entity : e) {
-                    if (entity instanceof EntityRideable) {
+                    if (entity instanceof EntityRideable && !entity.closed && entity.isAlive()) {
                         this.collidingWith(entity);
                     }
                 }
@@ -454,11 +478,11 @@ public abstract class EntityLiving extends Entity implements EntityDamageable {
             }
         }
 
-        return blocks.toArray(new Block[0]);
+        return blocks.toArray(Block.EMPTY_ARRAY);
     }
 
     public Block getTargetBlock(int maxDistance) {
-        return getTargetBlock(maxDistance, new Integer[]{});
+        return getTargetBlock(maxDistance, new Integer[0]);
     }
 
     public Block getTargetBlock(int maxDistance, Map<Integer, Object> transparent) {
@@ -600,4 +624,44 @@ public abstract class EntityLiving extends Entity implements EntityDamageable {
         return human;
     }
 
+    public Map<String, EntityMovementSpeedModifier> getMovementSpeedModifiers() {
+        return movementSpeedModifiers;
+    }
+
+    public void addMovementSpeedModifier(EntityMovementSpeedModifier modifier) {
+        this.movementSpeedModifiers.put(modifier.getIdentifier(), modifier);
+        this.recalculateMovementSpeed();
+    }
+
+    public void removeMovementSpeedModifier(EntityMovementSpeedModifier modifier) {
+        this.removeMovementSpeedModifier(modifier.getIdentifier());
+    }
+
+    public boolean removeMovementSpeedModifier(String identifier) {
+        Object result = this.movementSpeedModifiers.remove(identifier);
+
+        if (result != null) {
+            this.recalculateMovementSpeed();
+            return true;
+        }
+
+        return false;
+    }
+
+    public void recalculateMovementSpeed() {
+        float newMovementSpeed = Player.DEFAULT_SPEED;
+        for (EntityMovementSpeedModifier modifier : this.movementSpeedModifiers.values()) {
+            float value = modifier.getValue();
+            if (modifier.isSend()) {
+                if (modifier.getOperation() == EntityMovementSpeedModifier.Operation.MULTIPLY) {
+                    if (value != 0) {
+                        newMovementSpeed *= value;
+                    }
+                } else {
+                    newMovementSpeed += value;
+                }
+            }
+        }
+        this.setMovementSpeed(newMovementSpeed);
+    }
 }
