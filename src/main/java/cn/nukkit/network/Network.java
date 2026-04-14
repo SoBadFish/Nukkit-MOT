@@ -217,7 +217,7 @@ public class Network {
         return hardWareNetworkInterfaces;
     }
 
-    public void processBatch(byte[] payload, Collection<DataPacket> packets, CompressionProvider compression, int raknetProtocol, Player player) {
+    public boolean processBatch(byte[] payload, Collection<DataPacket> packets, CompressionProvider compression, int raknetProtocol, Player player) {
         int maxSize = 3145728; // 3 * 1024 * 1024
         if (player != null && player.getSkin() == null) {
             maxSize = 6291456; // 6 * 1024 * 1024
@@ -227,12 +227,12 @@ public class Network {
             data = compression.decompress(payload, maxSize);
         } catch (Exception e) {
             log.debug("Exception while inflating batch packet", e);
-            return;
+            return false;
         }
 
         BinaryStream stream = new BinaryStream(data);
+        int count = 0;
         try {
-            int count = 0;
             while (!stream.feof()) {
                 count++;
                 if (count >= 1000) {
@@ -298,7 +298,9 @@ public class Network {
             if (log.isDebugEnabled()) {
                 log.debug("Error whilst decoding batch packet", e);
             }
+            return false;
         }
+        return count > 0;
     }
 
     /**
@@ -580,6 +582,7 @@ public class Network {
                 .registerPacket(ProtocolInfo.PLAYER_ENCHANT_OPTIONS_PACKET, PlayerEnchantOptionsPacket.class)
                 .registerPacket(ProtocolInfo.UPDATE_PLAYER_GAME_TYPE_PACKET, UpdatePlayerGameTypePacket.class)
                 .registerPacket(ProtocolInfo.UPDATE_ABILITIES_PACKET, UpdateAbilitiesPacket.class)
+                .registerPacket(ProtocolInfo.DIMENSION_DATA_PACKET, DimensionDataPacket.class)
                 .registerPacket(ProtocolInfo.REQUEST_ABILITY_PACKET, RequestAbilityPacket.class)
                 .registerPacket(ProtocolInfo.UPDATE_ADVENTURE_SETTINGS_PACKET, UpdateAdventureSettingsPacket.class)
                 .registerPacket(ProtocolInfo.DEATH_INFO_PACKET, DeathInfoPacket.class)
@@ -630,12 +633,21 @@ public class Network {
                 .registerPacket(ProtocolInfo.PLAYER_LOCATIONS_PACKET, PlayerLocationPacket.class)
                 // v924 packets
                 .registerPacket(ProtocolInfo.CLIENTBOUND_DATA_DRIVEN_UI_SHOW_SCREEN_PACKET, ClientboundDataDrivenUIShowScreenPacket.class)
-                .registerPacket(ProtocolInfo.CLIENTBOUND_DATA_DRIVEN_UI_CLOSE_ALL_SCREENS_PACKET, ClientboundDataDrivenUICloseAllScreensPacket.class)
+                .registerPacket(ProtocolInfo.CLIENTBOUND_DATA_DRIVEN_UI_CLOSE_SCREEN_PACKET, ClientboundDataDrivenUICloseScreenPacket.class)
                 .registerPacket(ProtocolInfo.CLIENTBOUND_DATA_DRIVEN_UI_RELOAD_PACKET, ClientboundDataDrivenUIReloadPacket.class)
                 .registerPacket(ProtocolInfo.CLIENTBOUND_TEXTURE_SHIFT_PACKET, ClientboundTextureShiftPacket.class)
                 .registerPacket(ProtocolInfo.VOXEL_SHAPES_PACKET, VoxelShapesPacket.class)
                 .registerPacket(ProtocolInfo.CAMERA_SPLINE_PACKET, CameraSplinePacket.class)
                 .registerPacket(ProtocolInfo.CAMERA_AIM_ASSIST_ACTOR_PRIORITY_PACKET, CameraAimAssistActorPriorityPacket.class)
+                // v897 packets
+                .registerPacket(ProtocolInfo.SERVERBOUND_DATA_STORE_PACKET, ServerboundDataStorePacket.class)
+                // v944 packets
+                .registerPacket(ProtocolInfo.RESOURCE_PACKS_READY_FOR_VALIDATION_PACKET, ResourcePacksReadyForValidationPacket.class)
+                .registerPacket(ProtocolInfo.LOCATOR_BAR_PACKET, LocatorBarPacket.class)
+                .registerPacket(ProtocolInfo.PARTY_CHANGED_PACKET, PartyChangedPacket.class)
+                .registerPacket(ProtocolInfo.SERVERBOUND_DATA_DRIVEN_SCREEN_CLOSED_PACKET, ServerboundDataDrivenScreenClosedPacket.class)
+                .registerPacket(ProtocolInfo.SYNC_WORLD_CLOCKS_PACKET, SyncWorldClocksPacket.class)
+                .registerPacket(ProtocolInfo.CLIENTBOUND_ATTRIBUTE_LAYER_SYNC_PACKET, ClientboundAttributeLayerSyncPacket.class)
                 .build();
     }
 

@@ -3,7 +3,9 @@ package cn.nukkit.network.protocol;
 import cn.nukkit.GameVersion;
 import cn.nukkit.Nukkit;
 import cn.nukkit.Server;
+import cn.nukkit.math.BlockVector3;
 import cn.nukkit.network.Network;
+import cn.nukkit.network.protocol.types.inventory.FullContainerName;
 import cn.nukkit.utils.BinaryStream;
 import cn.nukkit.utils.SnappyCompression;
 import cn.nukkit.utils.Zlib;
@@ -31,6 +33,11 @@ public abstract class DataPacket extends BinaryStream implements Cloneable {
     public abstract void decode();
 
     public abstract void encode();
+
+    @Override
+    public void writeFullContainerName(FullContainerName fullContainerName) {
+        super.writeFullContainerName(fullContainerName, this.gameVersion);
+    }
 
     public final void tryEncode() {
         if (!this.isEncoded) {
@@ -126,16 +133,31 @@ public abstract class DataPacket extends BinaryStream implements Cloneable {
         }
     }
 
-    void decodeUnsupported() {
+    protected void decodeUnsupported() {
         if (Nukkit.DEBUG > 1) {
             Server.getInstance().getLogger().debug("Warning: decode() not implemented for " + this.getClass().getName());
         }
     }
 
-    void encodeUnsupported() {
+    protected void encodeUnsupported() {
         if (Nukkit.DEBUG > 1) {
             Server.getInstance().getLogger().debug("Warning: encode() not implemented for " + this.getClass().getName());
             Thread.dumpStack();
         }
+    }
+
+    @Override
+    public BlockVector3 getBlockVector3() {
+        return super.getBlockVector3(this.gameVersion);
+    }
+
+    @Override
+    public void putBlockVector3(BlockVector3 v) {
+        super.putBlockVector3(this.gameVersion, v);
+    }
+
+    @Override
+    public void putBlockVector3(int x, int y, int z) {
+        super.putBlockVector3(this.gameVersion, x, y, z);
     }
 }

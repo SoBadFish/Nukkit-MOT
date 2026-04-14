@@ -285,6 +285,7 @@ public class Level implements ChunkManager, Metadatable {
 
     private final Object2ObjectMap<GameVersion, ConcurrentMap<Long, Int2ObjectMap<Player>>> chunkSendQueues = new Object2ObjectOpenHashMap<>();
     private final Object2ObjectMap<GameVersion, LongSet> chunkSendTasks = new Object2ObjectOpenHashMap<>();
+    private final Object2ObjectMap<GameVersion, LongSet> pendingChunkRequests = new Object2ObjectOpenHashMap<>();
 
     private final Cache<Long, Boolean> entityNearbyCacheDirty = Caffeine.newBuilder()
             .maximumSize(512)
@@ -458,10 +459,11 @@ public class Level implements ChunkManager, Metadatable {
 
     @Deprecated
     public static long blockHash(int x, int y, int z) {
-        if (y < -64 || y >= 384) {
+        DimensionData overworld = DimensionEnum.OVERWORLD.getDimensionData();
+        if (y < overworld.getMinHeight() || y > overworld.getMaxHeight()) {
             throw new IllegalArgumentException("Y coordinate " + y + " is out of range!");
         }
-        return blockHash(x, y, z, DimensionEnum.OVERWORLD.getDimensionData());
+        return blockHash(x, y, z, overworld);
     }
 
     public static long blockHash(int x, int y, int z, DimensionData dimensionData) {
@@ -1092,7 +1094,9 @@ public class Level implements ChunkManager, Metadatable {
 
         this.levelCurrentTick++;
 
-        this.unloadChunks();
+        if (this.levelCurrentTick % 10 == 0) {
+            this.unloadChunks();
+        }
 
         this.updateQueue.tick(this.levelCurrentTick);
 
@@ -1127,8 +1131,10 @@ public class Level implements ChunkManager, Metadatable {
         while (updateBlockEntities.hasNext()) {
             BlockEntity be = updateBlockEntities.next();
             if (!be.isValid()) {
+                be.scheduledForBlockEntityUpdate.set(false);
                 updateBlockEntities.remove();
             } else if (!be.onUpdate()) {
+                be.scheduledForBlockEntityUpdate.set(false);
                 updateBlockEntities.remove();
             }
         }
@@ -1447,6 +1453,9 @@ public class Level implements ChunkManager, Metadatable {
         boolean blockTest = true;
 
         if (!chunkTickList.isEmpty()) {
+            final boolean doRandomTick = this.randomTickingEnabled();
+            final int randomTickSpeed = doRandomTick ? gameRules.getInteger(GameRule.RANDOM_TICK_SPEED) : 0;
+
             ObjectIterator<Long2IntMap.Entry> iter = chunkTickList.long2IntEntrySet().iterator();
             while (iter.hasNext()) {
                 Long2IntMap.Entry entry = iter.next();
@@ -1474,8 +1483,7 @@ public class Level implements ChunkManager, Metadatable {
                     entity.scheduleUpdate();
                 }
 
-                if (this.randomTickingEnabled()) {
-                    final int randomTickSpeed = gameRules.getInteger(GameRule.RANDOM_TICK_SPEED);
+                if (doRandomTick && randomTickSpeed > 0) {
                     if (this.useSections) {
                         for (ChunkSection section : ((Chunk) chunk).getSections()) {
                             if (!(section instanceof EmptyChunkSection)) {
@@ -1486,9 +1494,10 @@ public class Level implements ChunkManager, Metadatable {
                                     int z = n >> 8 & 0xF;
                                     int y = n >> 16 & 0xF;
 
-                                    int blockId = section.getBlockId(x, y, z);
+                                    int fullBlock = section.getFullBlock(x, y, z);
+                                    int blockId = fullBlock >> Block.DATA_BITS;
                                     if (blockId >= 0 && blockId <= Block.MAX_BLOCK_ID && randomTickBlocks[blockId]) {
-                                        Block block = Block.get(blockId, section.getBlockData(x, y, z), this, chunkX * 16 + x, (Y << 4) + y, chunkZ * 16 + z);
+                                        Block block = Block.get(fullBlock, this, chunkX * 16 + x, (Y << 4) + y, chunkZ * 16 + z);
                                         block.onUpdate(BLOCK_UPDATE_RANDOM);
                                     }
                                 }
@@ -2188,10 +2197,7 @@ public class Level implements ChunkManager, Metadatable {
 
     @Override
     public void setBlockFullIdAt(int x, int y, int z, int layer, int fullId) {
-        Block block = Block.fullList[fullId];
-        if (block == null) {
-            block = new BlockUnknown(fullId >> Block.DATA_BITS, fullId & Block.DATA_MASK);
-        }
+        Block block = Block.get(fullId >> Block.DATA_BITS, fullId & Block.DATA_MASK);
         this.setBlock(x, y, z, layer, block, false, false);
     }
 
@@ -3818,6 +3824,7 @@ public class Level implements ChunkManager, Metadatable {
 
         this.getChunkSendQueue(player.getGameVersion()).computeIfAbsent(index, k ->
                 new Int2ObjectOpenHashMap<>()).put(player.getLoaderId(), player);
+        this.getPendingChunkRequests(player.getGameVersion()).add(index);
     }
 
     private void sendChunk(int x, int z, long index, DataPacket packet) {
@@ -3843,17 +3850,21 @@ public class Level implements ChunkManager, Metadatable {
     }
 
     private void processChunkRequest() {
-        // Map shorted by index => requested protocols
         Long2ObjectMap<ObjectSet<GameVersion>> chunkRequests = new Long2ObjectOpenHashMap<>();
-        for (GameVersion protocolId : this.chunkSendQueues.keySet()) {
-            for (long index : this.getChunkSendQueue(protocolId).keySet()) {
-                LongSet tasks = this.getChunkSendTasks(protocolId);
-                if (tasks.contains(index)) {
-                    continue;
-                }
-                chunkRequests.computeIfAbsent(index, l -> new ObjectOpenHashSet<>()).add(protocolId);
-                tasks.add(index);
+        for (GameVersion protocolId : this.pendingChunkRequests.keySet()) {
+            LongSet pending = this.getPendingChunkRequests(protocolId);
+            if (pending.isEmpty()) {
+                continue;
             }
+            LongSet tasks = this.getChunkSendTasks(protocolId);
+            ConcurrentMap<Long, Int2ObjectMap<Player>> queue = this.getChunkSendQueue(protocolId);
+            for (long index : pending) {
+                if (!tasks.contains(index) && queue.containsKey(index)) {
+                    chunkRequests.computeIfAbsent(index, l -> new ObjectOpenHashSet<>()).add(protocolId);
+                    tasks.add(index);
+                }
+            }
+            pending.clear();
         }
 
         this.chunkRequestInternal(chunkRequests);
@@ -3964,7 +3975,8 @@ public class Level implements ChunkManager, Metadatable {
     public void scheduleBlockEntityUpdate(BlockEntity entity) {
         Preconditions.checkNotNull(entity, "entity");
         Preconditions.checkArgument(entity.getLevel() == this, "BlockEntity is not in this level");
-        if (!updateBlockEntities.contains(entity)) {
+        if (entity.scheduledForBlockEntityUpdate.compareAndSet(false, true)) {
+            entity.setDirty();
             updateBlockEntities.add(entity);
         }
     }
@@ -3976,6 +3988,7 @@ public class Level implements ChunkManager, Metadatable {
         entity.close();
 
         blockEntities.remove(entity.getId());
+        entity.scheduledForBlockEntityUpdate.set(false);
         updateBlockEntities.remove(entity);
     }
 
@@ -4092,15 +4105,7 @@ public class Level implements ChunkManager, Metadatable {
             LevelProvider levelProvider = this.requireProvider();
             if (chunk != null) {
                 if (trySave && this.autoSave) {
-                    int entities = 0;
-                    for (Entity e : chunk.getEntities().values()) {
-                        if (e instanceof Player) {
-                            continue;
-                        }
-                        ++entities;
-                    }
-
-                    if (chunk.hasChanged() || !chunk.getBlockEntities().isEmpty() || entities > 0) {
+                    if (chunk.hasChanged()) {
                         levelProvider.setChunk(x, z, chunk);
                         levelProvider.saveChunk(x, z);
                     }
@@ -4487,18 +4492,6 @@ public class Level implements ChunkManager, Metadatable {
     }
 
     public void addEntityMovement(Entity entity, double x, double y, double z, double yaw, double pitch, double headYaw) {
-        MoveEntityAbsolutePacket pk = new MoveEntityAbsolutePacket();
-        pk.eid = entity.getId();
-        pk.x = x;
-        pk.y = y;
-        pk.z = z;
-        pk.yaw = yaw;
-        pk.headYaw = headYaw;
-        pk.pitch = pitch;
-        pk.onGround = entity.onGround;
-
-        entity.getViewers().values().stream().filter(p -> p.protocol < ProtocolInfo.v1_16_100).forEach(p -> p.dataPacket(pk));
-
         MoveEntityDeltaPacket pk2 = new MoveEntityDeltaPacket();
         pk2.eid = entity.getId();
         if (entity.lastX != x) {
@@ -4529,7 +4522,25 @@ public class Level implements ChunkManager, Metadatable {
             pk2.flags |= MoveEntityDeltaPacket.FLAG_ON_GROUND;
         }
 
-        entity.getViewers().values().stream().filter(p -> p.protocol >= ProtocolInfo.v1_16_100).forEach(p -> p.dataPacket(pk2));
+        MoveEntityAbsolutePacket pk = null; // Lazily created for legacy clients only
+        for (Player p : entity.getViewers().values()) {
+            if (p.protocol < ProtocolInfo.v1_16_100) {
+                if (pk == null) {
+                    pk = new MoveEntityAbsolutePacket();
+                    pk.eid = entity.getId();
+                    pk.x = x;
+                    pk.y = y;
+                    pk.z = z;
+                    pk.yaw = yaw;
+                    pk.headYaw = headYaw;
+                    pk.pitch = pitch;
+                    pk.onGround = entity.onGround;
+                }
+                p.dataPacket(pk);
+            } else {
+                p.dataPacket(pk2);
+            }
+        }
     }
 
     public boolean isRaining() {
@@ -5229,17 +5240,26 @@ public class Level implements ChunkManager, Metadatable {
         return this.chunkSendTasks.computeIfAbsent(protocolId, i -> new LongOpenHashSet());
     }
 
+    private LongSet getPendingChunkRequests(GameVersion protocol) {
+        GameVersion protocolId = this.getChunkProtocol(protocol);
+        return this.pendingChunkRequests.computeIfAbsent(protocolId, i -> new LongOpenHashSet());
+    }
+
     private GameVersion getChunkProtocol(GameVersion version) {
         int protocol = version.getProtocol();
         if (version.isNetEase()) {
-            if (protocol >= GameVersion.V1_21_50_NETEASE.getProtocol()) {
+            if (protocol >= GameVersion.V1_21_93_NETEASE.getProtocol()) {
+                return GameVersion.V1_21_93_NETEASE;
+            } else if (protocol >= GameVersion.V1_21_50_NETEASE.getProtocol()) {
                 return GameVersion.V1_21_50_NETEASE;
             } else if (protocol >= GameVersion.V1_21_2_NETEASE.getProtocol()) {
                 return GameVersion.V1_21_2_NETEASE;
             }
             return GameVersion.V1_20_50_NETEASE;
         }
-        if (protocol >= GameVersion.V1_21_110_26.getProtocol()) {
+        if (protocol >= GameVersion.V1_26_10.getProtocol()) {
+            return GameVersion.V1_26_10;
+        } else if (protocol >= GameVersion.V1_21_110_26.getProtocol()) {
             return GameVersion.V1_21_110;
         } else if (protocol >= GameVersion.V1_21_100.getProtocol()) {
             return GameVersion.V1_21_100;
@@ -5388,7 +5408,9 @@ public class Level implements ChunkManager, Metadatable {
         if (chunk == ProtocolInfo.v1_21_90)
             if (player >= ProtocolInfo.v1_21_90) if (player <= ProtocolInfo.v1_21_93) return true;
         if (chunk == GameVersion.V1_21_100.getProtocol()) if (player == GameVersion.V1_21_100.getProtocol()) return true;
-        if (chunk == GameVersion.V1_21_110.getProtocol()) if (player >= GameVersion.V1_21_110_26.getProtocol()) return true;
+        if (chunk == GameVersion.V1_21_110.getProtocol())
+            if (player >= GameVersion.V1_21_110_26.getProtocol()) if (player <= GameVersion.V1_26_0.getProtocol()) return true;
+        if (chunk == GameVersion.V1_26_10.getProtocol())  if (player >= GameVersion.V1_26_10.getProtocol()) return true;
         return false; //TODO Multiversion  Remember to update when block palette changes
     }
 

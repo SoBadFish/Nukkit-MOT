@@ -1,10 +1,10 @@
 [versions]
-log4j = "2.25.3"
+log4j = "2.25.4"
 jline = "3.30.6"
 leveldb_java = "1.1.0"
 leveldb_jni = "0.0.10"
 block_state_updater = "1.21.60-20250619.144147-3"
-netty_epoll = "4.1.101.Final"
+netty_epoll = "4.1.131.Final"
 caffeine = "3.1.8"
 guava = "33.1.0-jre"
 gson = "2.10.1"
@@ -27,17 +27,22 @@ jose4j = "0.9.6"
 junit = "5.10.2"
 mockito = "5.11.0"
 nukkitx_natives = "1.0.3"
-raknet = "1.0.0.CR3-20260303.150721-27"
-cloudburst_common = "3.0.0.Beta7-20250812.232642-18"
+raknet = "1.0.0.CR4-20260406.120344-3"
+cloudburst_common = "3.0.0.Beta12-20260324.161234-12"
 jackson_dataformat_toml = "2.20.1"
 okaeri_configs = "6.1.0-beta.1"
+cloudburst_math = "2.0-SNAPSHOT"
+allay_protocol_extension = "0.1.6"
 
 [libraries]
-raknet = { module = "org.cloudburstmc.netty:netty-transport-raknet", version.ref = "raknet" }
+raknet = { module = "dev.mot.netty:netty-transport-raknet", version.ref = "raknet" }
 netty-epoll = { module = "io.netty:netty-transport-native-epoll", version.ref = "netty_epoll" }
 netty-codec-haproxy = { module = "io.netty:netty-codec-haproxy", version.ref = "netty_epoll" }
 nukkitx-natives = { module = "com.nukkitx:natives", version.ref = "nukkitx_natives" }
 cloudburst-common = { module = "org.cloudburstmc.protocol:common", version.ref = "cloudburst_common" }
+cloudburst-bedrock-codec = { module = "org.cloudburstmc.protocol:bedrock-codec", version.ref = "cloudburst_common" }
+cloudburst-math = { module = "org.cloudburstmc.math:immutable", version.ref = "cloudburst_math" }
+allay-protocol-extension = { module = "org.allaymc:protocol-extension", version.ref = "allay_protocol_extension" }
 fastutil = { module = "it.unimi.dsi:fastutil", version.ref = "fastutil" }
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }

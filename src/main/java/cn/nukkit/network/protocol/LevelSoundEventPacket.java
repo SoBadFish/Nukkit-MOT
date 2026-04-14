@@ -450,6 +450,9 @@ public class LevelSoundEventPacket extends DataPacket {
     public static final int SOUND_CONVERT_TO_FROG = 440;
     public static final int SOUND_RECORD_PLAYING = 441;
     public static final int SOUND_ENCHANTING_TABLE_USE = 442;
+    public static final int SOUND_BUNDLE_DROP_CONTENTS = 445;
+    public static final int SOUND_BUNDLE_INSERT = 446;
+    public static final int SOUND_BUNDLE_REMOVE_ONE = 447;
 
     public static final int SOUND_PRESSURE_PLATE_CLICK_OFF = 448;
     public static final int SOUND_PRESSURE_PLATE_CLICK_ON = 449;
@@ -823,8 +826,18 @@ public class LevelSoundEventPacket extends DataPacket {
      * @since v924
      */
     public static final int SOUND_NETHERITE_SPEAR_USE = 596;
-
-    public static final int SOUND_UNDEFINED = Utils.dynamic(597);
+    /**
+     * @since v944
+     */
+    public static final int SOUND_PAUSE_GROWTH = 597;
+    /**
+     * @since v944
+     */
+    public static final int SOUND_RESET_GROWTH = 598;
+    /**
+     * @since v944
+     */
+    public static final int SOUND_UNDEFINED = Utils.dynamic(599);
 
     public int sound;
     public float x;

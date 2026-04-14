@@ -289,15 +289,7 @@ public class CustomBlockManager {
 
         if (blockDefinition != null && blockDefinition.shouldRegisterCreativeItem()) {
             ItemBlock itemBlock = new ItemBlock((Block) blockSample);
-            for (GameVersion version : GameVersion.values()) {
-                if (version.getProtocol() >= ProtocolInfo.v1_16_100) {
-                    try {
-                        Item.addCreativeItem(version, itemBlock, blockDefinition.getCreativeCategory(), blockDefinition.getCreativeGroup());
-                    } catch (IllegalArgumentException e) {
-                        // Ignore unsupported versions
-                    }
-                }
-            }
+            Item.addCreativeItem(itemBlock, blockDefinition.getCreativeCategory(), blockDefinition.getCreativeGroup());
         }
     }
 
@@ -397,6 +389,8 @@ public class CustomBlockManager {
             }
             result = true;
         }
+
+        GlobalBlockPalette.compactCaches();
 
         log.info("Custom block registry closed in {}ms", (System.currentTimeMillis() - startTime));
         this.saveIdMapping();
@@ -507,6 +501,8 @@ public class CustomBlockManager {
                 runtimeId++;
             }
         }
+
+        palette.lock();
     }
 
     private List<NbtMap> loadVanillaPalette(GameVersion version) throws FileNotFoundException {

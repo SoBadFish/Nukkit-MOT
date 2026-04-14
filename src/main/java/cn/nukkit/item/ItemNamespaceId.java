@@ -48,6 +48,8 @@ public interface ItemNamespaceId {
 
     String OMINOUS_BOTTLE = "minecraft:ominous_bottle";
 
+    String BREEZE_ROD = "minecraft:breeze_rod";
+
     String BLUE_EGG = "minecraft:blue_egg";
     String BROWN_EGG = "minecraft:brown_egg";
 
@@ -62,4 +64,38 @@ public interface ItemNamespaceId {
     String COPPER_BOOTS = "minecraft:copper_boots";
     String COPPER_NUGGET = "minecraft:copper_nugget";
 
+    String WHITE_HARNESS = "minecraft:white_harness";
+    String LIGHT_GRAY_HARNESS = "minecraft:light_gray_harness";
+    String GRAY_HARNESS = "minecraft:gray_harness";
+    String BLACK_HARNESS = "minecraft:black_harness";
+    String BROWN_HARNESS = "minecraft:brown_harness";
+    String RED_HARNESS = "minecraft:red_harness";
+    String ORANGE_HARNESS = "minecraft:orange_harness";
+    String YELLOW_HARNESS = "minecraft:yellow_harness";
+    String LIME_HARNESS = "minecraft:lime_harness";
+    String GREEN_HARNESS = "minecraft:green_harness";
+    String CYAN_HARNESS = "minecraft:cyan_harness";
+    String LIGHT_BLUE_HARNESS = "minecraft:light_blue_harness";
+    String BLUE_HARNESS = "minecraft:blue_harness";
+    String PURPLE_HARNESS = "minecraft:purple_harness";
+    String MAGENTA_HARNESS = "minecraft:magenta_harness";
+    String PINK_HARNESS = "minecraft:pink_harness";
+
+    String BUNDLE = "minecraft:bundle";
+    String WHITE_BUNDLE = "minecraft:white_bundle";
+    String LIGHT_GRAY_BUNDLE = "minecraft:light_gray_bundle";
+    String GRAY_BUNDLE = "minecraft:gray_bundle";
+    String BLACK_BUNDLE = "minecraft:black_bundle";
+    String BROWN_BUNDLE = "minecraft:brown_bundle";
+    String RED_BUNDLE = "minecraft:red_bundle";
+    String ORANGE_BUNDLE = "minecraft:orange_bundle";
+    String YELLOW_BUNDLE = "minecraft:yellow_bundle";
+    String LIME_BUNDLE = "minecraft:lime_bundle";
+    String GREEN_BUNDLE = "minecraft:green_bundle";
+    String CYAN_BUNDLE = "minecraft:cyan_bundle";
+    String LIGHT_BLUE_BUNDLE = "minecraft:light_blue_bundle";
+    String BLUE_BUNDLE = "minecraft:blue_bundle";
+    String PURPLE_BUNDLE = "minecraft:purple_bundle";
+    String MAGENTA_BUNDLE = "minecraft:magenta_bundle";
+    String PINK_BUNDLE = "minecraft:pink_bundle";
 }

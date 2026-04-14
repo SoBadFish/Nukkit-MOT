@@ -464,11 +464,23 @@ public class LevelDBProvider implements LevelProvider {
     public boolean unloadChunk(int chunkX, int chunkZ, boolean safe) {
         long index = Level.chunkHash(chunkX, chunkZ);
         BaseFullChunk chunk = this.chunks.get(index);
-        if (chunk == null || !chunk.unload(false, safe)) {
+        if (chunk == null) {
             return false;
         }
-        // TODO: this.lastChunk.set(null);
-        this.chunks.remove(index, chunk); // TODO: Do this after saveChunkFuture to prevent loading of old copy
+        if (chunk instanceof LevelDBChunk levelDBChunk) {
+            // Wait for any pending async save to complete before closing entities
+            levelDBChunk.writeLock().lock();
+            levelDBChunk.writeLock().unlock();
+            // If still dirty (async save failed or hasn't run), retry synchronously
+            // while entities/block entities are still alive
+            if (levelDBChunk.hasChanged()) {
+                this.saveChunkSync(chunkX, chunkZ, levelDBChunk);
+            }
+        }
+        if (!chunk.unload(false, safe)) {
+            return false;
+        }
+        this.chunks.remove(index, chunk);
         return true;
     }
 
@@ -497,10 +509,9 @@ public class LevelDBProvider implements LevelProvider {
             return CompletableFuture.completedFuture(null);
         }
 
-        chunk.setChanged(false);
-
+        long changeSnapshot = chunk.getChanges();
         WriteBatch batch = this.save0(chunkX, chunkZ, chunk);
-        return CompletableFuture.runAsync(() -> this.saveChunkCallback(batch, chunk), this.executor);
+        return CompletableFuture.runAsync(() -> this.saveChunkCallback(batch, chunk, changeSnapshot), this.executor);
     }
 
     public void saveChunkSync(int chunkX, int chunkZ, FullChunk fullChunk) {
@@ -515,10 +526,9 @@ public class LevelDBProvider implements LevelProvider {
             return;
         }
 
-        chunk.setChanged(false);
-
+        long changeSnapshot = chunk.getChanges();
         WriteBatch batch = this.save0(chunkX, chunkZ, chunk);
-        this.saveChunkCallback(batch, chunk);
+        this.saveChunkCallback(batch, chunk, changeSnapshot);
     }
 
     private WriteBatch save0(int chunkX, int chunkZ, LevelDBChunk chunk) {
@@ -561,13 +571,16 @@ public class LevelDBProvider implements LevelProvider {
             NbtMap ticks = saveBlockTickingQueue(blockUpdateEntries, currentTick);
             if (ticks != null) {
                 ByteBuf byteBuf = ByteBufAllocator.DEFAULT.ioBuffer();
-                try (NBTOutputStream outputStream = NbtUtils.createWriterLE(new ByteBufOutputStream(byteBuf))) {
-                    outputStream.writeTag(ticks);
+                try {
+                    try (NBTOutputStream outputStream = NbtUtils.createWriterLE(new ByteBufOutputStream(byteBuf))) {
+                        outputStream.writeTag(ticks);
+                    }
+                    writeBatch.put(pendingScheduledTicksKey, Utils.convertByteBuf2Array(byteBuf));
                 } catch (IOException e) {
                     throw new RuntimeException(e);
+                } finally {
+                    byteBuf.release();
                 }
-                writeBatch.put(pendingScheduledTicksKey, Utils.convertByteBuf2Array(byteBuf));
-                byteBuf.release();
             } else {
                 writeBatch.delete(pendingScheduledTicksKey);
             }
@@ -597,14 +610,19 @@ public class LevelDBProvider implements LevelProvider {
         return writeBatch;
     }
 
-    private void saveChunkCallback(WriteBatch batch, LevelDBChunk chunk) {
+    private void saveChunkCallback(WriteBatch batch, LevelDBChunk chunk, long changeSnapshot) {
         chunk.writeLock().lock();
         try {
             this.db.write(batch);
-            batch.close();
+            chunk.clearChangesIfUnmodified(changeSnapshot);
         } catch (Exception e) {
             log.error("Exception in saveChunkCallback for {}", this.getName(), e);
         } finally {
+            try {
+                batch.close();
+            } catch (IOException e) {
+                log.error("Failed to close WriteBatch for {}", this.getName(), e);
+            }
             chunk.writeLock().unlock();
         }
     }
@@ -613,7 +631,6 @@ public class LevelDBProvider implements LevelProvider {
     public void saveChunks() {
         for (BaseFullChunk chunk : this.chunks.values()) {
             if (chunk.hasChanged()) {
-                chunk.setChanged(false);
                 this.saveChunk(chunk.getX(), chunk.getZ(), chunk);
             }
         }
@@ -628,13 +645,18 @@ public class LevelDBProvider implements LevelProvider {
         Iterator<BaseFullChunk> iterator = this.chunks.values().iterator();
         while (iterator.hasNext()) {
             LevelDBChunk chunk = (LevelDBChunk) iterator.next();
-            chunk.unload(level.isSaveOnUnloadEnabled(), false);
             if (wait) {
+                // Wait for any pending async save before closing entities
                 if (!chunk.writeLock().tryLock()) {
                     chunk.writeLock().lock();
                 }
                 chunk.writeLock().unlock();
+                // If async save failed, retry synchronously while chunk is still alive
+                if (chunk.hasChanged()) {
+                    this.saveChunkSync(chunk.getX(), chunk.getZ(), chunk);
+                }
             }
+            chunk.unload(level.isSaveOnUnloadEnabled(), false);
             iterator.remove();
         }
     }
@@ -734,7 +756,11 @@ public class LevelDBProvider implements LevelProvider {
 
             gcLock.lock();
 
-            this.unloadChunksUnsafe(true);
+            try {
+                this.unloadChunksUnsafe(true);
+            } catch (Exception e) {
+                log.error("Error unloading chunks during close for: {}", this.getName(), e);
+            }
             this.closed = true;
             this.level = null;
             this.executor.shutdown();
@@ -752,14 +778,14 @@ public class LevelDBProvider implements LevelProvider {
             } catch (InterruptedException e) {
                 this.executor.shutdownNow();
             }
-
+        } finally {
             try {
                 this.db.close();
             } catch (IOException e) {
-                throw new RuntimeException("Can not close database", e);
+                log.error("Can not close database: {}", this.getName(), e);
+            } finally {
+                this.gcLock.unlock();
             }
-        } finally {
-            this.gcLock.unlock();
         }
     }
 
@@ -964,8 +990,8 @@ public class LevelDBProvider implements LevelProvider {
 
     protected void loadBlockTickingQueue(byte[] data, boolean tickingQueueTypeIsRandom) {
         NbtMap ticks;
-        try {
-            ticks = (NbtMap) NbtUtils.createReaderLE(new ByteBufInputStream(Unpooled.wrappedBuffer(data))).readTag();
+        try (NBTInputStream reader = NbtUtils.createReaderLE(new ByteBufInputStream(Unpooled.wrappedBuffer(data)))) {
+            ticks = (NbtMap) reader.readTag();
         } catch (IOException e) {
             throw new ChunkException("Corrupted block ticking data", e);
         }
@@ -1092,8 +1118,10 @@ public class LevelDBProvider implements LevelProvider {
             }
 
             log.debug("Running AutoCompaction... ({})", path);
+            boolean locked = false;
             try {
-                if (!gcLock.tryLock(500, TimeUnit.MILLISECONDS)) {
+                locked = gcLock.tryLock(500, TimeUnit.MILLISECONDS);
+                if (!locked) {
                     return;
                 }
 
@@ -1123,7 +1151,9 @@ public class LevelDBProvider implements LevelProvider {
             } catch (InterruptedException e) {
                 log.debug("AutoCompaction interrupted", e);
             } finally {
-                gcLock.unlock();
+                if (locked) {
+                    gcLock.unlock();
+                }
             }
         }
 

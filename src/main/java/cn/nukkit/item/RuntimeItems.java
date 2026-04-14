@@ -21,6 +21,7 @@ import java.util.Map;
 public class RuntimeItems {
 
     private static final Map<String, Integer> legacyString2LegacyInt = new HashMap<>();
+    private static final Map<String, int[]> flattenedId2Legacy = new HashMap<>();
 
     private static RuntimeItemMapping mapping361;
     private static RuntimeItemMapping mapping419;
@@ -56,10 +57,12 @@ public class RuntimeItems {
     private static RuntimeItemMapping mapping859;
     private static RuntimeItemMapping mapping898;
     private static RuntimeItemMapping mapping924;
+    private static RuntimeItemMapping mapping944;
 
     private static RuntimeItemMapping mapping_netease_630;
     private static RuntimeItemMapping mapping_netease_686;
     private static RuntimeItemMapping mapping_netease_766;
+    private static RuntimeItemMapping mapping_netease_819;
 
     public static RuntimeItemMapping[] VALUES;
 
@@ -106,6 +109,19 @@ public class RuntimeItems {
             }
         }
 
+        // Register flattened identifiers (e.g., minecraft:oak_log) to legacy ID + damage
+        for (Map.Entry<String, MappingEntry> entry : mappingEntries.entrySet()) {
+            String flattenedId = entry.getKey();
+            if (flattenedId.isEmpty()) {
+                continue;
+            }
+            MappingEntry mappingEntry = entry.getValue();
+            int legacyId = legacyString2LegacyInt.getOrDefault(mappingEntry.getLegacyName(), -1);
+            if (legacyId != -1 && !flattenedId2Legacy.containsKey(flattenedId)) {
+                flattenedId2Legacy.put(flattenedId, new int[]{legacyId, mappingEntry.getDamage()});
+            }
+        }
+
         mapping361 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_12_0);
         mapping419 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_16_100);
         mapping440 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_17_0);
@@ -140,10 +156,12 @@ public class RuntimeItems {
         mapping859 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_21_120);
         mapping898 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_21_130);
         mapping924 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_26_0);
+        mapping944 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_26_10);
 
         mapping_netease_630 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_20_50_NETEASE);
         mapping_netease_686 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_21_2_NETEASE);
         mapping_netease_766 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_21_50_NETEASE);
+        mapping_netease_819 = new RuntimeItemMapping(mappingEntries, GameVersion.V1_21_93_NETEASE);
 
         VALUES = new RuntimeItemMapping[]{
                 mapping361,
@@ -180,10 +198,12 @@ public class RuntimeItems {
                 mapping859,
                 mapping898,
                 mapping924,
+                mapping944,
                 // NetEase
                 mapping_netease_630,
                 mapping_netease_686,
-                mapping_netease_766
+                mapping_netease_766,
+                mapping_netease_819
         };
     }
 
@@ -197,7 +217,9 @@ public class RuntimeItems {
         if (gameVersion.isNetEase()) {
             return getMappingNetEase(protocolId);
         }
-        if (protocolId >= ProtocolInfo.v1_26_0) {
+        if (protocolId >= ProtocolInfo.v1_26_10) {
+            return mapping944;
+        } else if (protocolId >= ProtocolInfo.v1_26_0) {
             return mapping924;
         } else if (protocolId >= ProtocolInfo.v1_21_130_28) {
             return mapping898;
@@ -268,7 +290,9 @@ public class RuntimeItems {
     }
 
     private static RuntimeItemMapping getMappingNetEase(int protocolId) {
-        if (protocolId >= GameVersion.V1_21_50_NETEASE.getProtocol()) {
+        if (protocolId >= GameVersion.V1_21_93_NETEASE.getProtocol()) {
+            return mapping_netease_819;
+        } else if (protocolId >= GameVersion.V1_21_50_NETEASE.getProtocol()) {
             return mapping_netease_766;
         } else if (protocolId >= GameVersion.V1_21_2_NETEASE.getProtocol()) {
             return mapping_netease_686;
@@ -278,6 +302,13 @@ public class RuntimeItems {
 
     public static int getLegacyIdFromLegacyString(String identifier) {
         return legacyString2LegacyInt.getOrDefault(identifier, -1);
+    }
+
+    /**
+     * @return int[]{legacyId, damage} or null if not found
+     */
+    public static int[] getLegacyFromFlattenedId(String identifier) {
+        return flattenedId2Legacy.get(identifier);
     }
 
     /**
